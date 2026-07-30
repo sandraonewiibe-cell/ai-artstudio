@@ -1,0 +1,26 @@
+{
+  "name": "ai-art-studio",
+  "version": "1.0.0",
+  "description": "AI ART STUDIO - touch-free kiosk that turns a drawing on paper into a generated boat.",
+  "main": "server/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "keywords": [
+    "ai",
+    "art",
+    "kiosk",
+    "express"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4",
+    "tesseract.js": "^5.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

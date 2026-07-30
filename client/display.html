@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI ART STUDIO — Display</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="page-display">
+    <!-- Everything on this screen is drawn here, so the recording is an exact
+         copy of what the visitor saw. -->
+    <canvas id="stage" class="stage-canvas"></canvas>
+
+    <!-- Source for the canvas background; never shown directly. -->
+    <video
+      id="backgroundSource"
+      class="offscreen-source"
+      src="/assets/background/bg.mp4"
+      autoplay
+      loop
+      muted
+      playsinline
+    ></video>
+
+    <div id="link" class="link-notice" hidden>
+      <p class="link-title">WAITING FOR THE SCANNER</p>
+      <p class="link-detail" id="linkDetail">Reconnecting…</p>
+    </div>
+
+    <script type="module" src="display.js"></script>
+  </body>
+</html>

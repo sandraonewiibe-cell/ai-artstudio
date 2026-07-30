@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI ART STUDIO — Scanner</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="page-scan">
+    <!-- Live camera, always running behind everything else. -->
+    <video id="preview" class="preview" autoplay playsinline muted></video>
+
+    <!-- Screen: scanning -->
+    <section id="screen-scan" class="screen screen-scan is-active">
+      <div class="scan-frame" id="scanFrame">
+        <span class="corner tl"></span>
+        <span class="corner tr"></span>
+        <span class="corner br"></span>
+        <span class="corner bl"></span>
+      </div>
+
+      <div class="scan-readout">
+        <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="ring-track" cx="60" cy="60" r="52" />
+          <circle id="ringValue" class="ring-value" cx="60" cy="60" r="52" />
+        </svg>
+        <p class="hint" id="scanHint">PLACE YOUR PAPER INSIDE THE FRAME</p>
+      </div>
+    </section>
+
+    <!-- Screen: generating -->
+    <section id="screen-process" class="screen screen-process">
+      <div class="loader" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <p class="process-title">CREATING YOUR BOAT</p>
+      <p class="process-stage" id="processStage">Reading the page</p>
+      <p class="detected-text" id="processText"></p>
+    </section>
+
+    <!-- Screen: handed off to the display wall -->
+    <section id="screen-sent" class="screen screen-sent">
+      <p class="sent-title">YOUR BOAT IS SAILING</p>
+      <p class="sent-detail">Look up at the big screen.</p>
+      <p class="detected-text is-visible" id="sentText"></p>
+    </section>
+
+    <!-- Screen: drawing rejected (not a boat) -->
+    <section id="screen-reject" class="screen screen-reject">
+      <p class="reject-title" id="rejectTitle">WE COULDN'T FIND A BOAT</p>
+      <p class="reject-detail" id="rejectDetail">
+        Draw a boat on the paper and try again.
+      </p>
+    </section>
+
+    <!-- Screen: error -->
+    <section id="screen-error" class="screen screen-error">
+      <p class="error-title">SOMETHING WENT WRONG</p>
+      <p class="error-detail" id="errorDetail"></p>
+      <p class="error-hint">Returning to the camera…</p>
+    </section>
+
+    <!-- Overlays -->
+    <div id="cameraNotice" class="notice" hidden>
+      <p class="notice-title">CAMERA UNAVAILABLE</p>
+      <p class="notice-detail" id="cameraNoticeDetail">Reconnecting…</p>
+    </div>
+
+    <div id="flash" class="flash" aria-hidden="true"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

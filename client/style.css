@@ -1,0 +1,456 @@
+/* AI ART STUDIO - shared by all three screens.
+   Everything sizes from the root font, so each page scales proportionally
+   from a development laptop up to a 1920x1080 wall. */
+
+html {
+  font-size: clamp(12px, 1.04vw, 24px);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+  color: #f4f4f6;
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  cursor: none; /* unattended kiosk */
+}
+
+/* ==========================================================================
+   Screen 1 - scanner
+   ========================================================================== */
+
+.preview {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+  transition: opacity 0.6s ease;
+}
+
+/* The camera is only shown while scanning. */
+body[data-screen="process"] .preview,
+body[data-screen="sent"] .preview,
+body[data-screen="reject"] .preview,
+body[data-screen="error"] .preview {
+  opacity: 0;
+}
+
+.screen {
+  position: fixed;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.screen.is-active {
+  display: flex;
+}
+
+/* ---------- scanning ---------- */
+
+.screen-scan {
+  justify-content: flex-end;
+  padding-bottom: 5vh;
+}
+
+.scan-frame {
+  position: absolute;
+  top: 8vh;
+  bottom: 20vh;
+  left: 50%;
+  transform: translateX(-50%);
+  aspect-ratio: 1 / 1.414; /* A4 portrait */
+  pointer-events: none;
+}
+
+.corner {
+  position: absolute;
+  width: 4rem;
+  height: 4rem;
+  border: 0.25rem solid rgba(255, 255, 255, 0.55);
+}
+
+.corner.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+.corner.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+.corner.br { bottom: 0; right: 0; border-left: none; border-top: none; }
+.corner.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+
+body[data-scan="settling"] .corner {
+  border-color: rgba(255, 255, 255, 0.95);
+}
+
+.scan-readout {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4rem;
+  padding: 1.6rem 3rem;
+  border-radius: 2rem;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.ring {
+  width: 5.5rem;
+  height: 5.5rem;
+  transform: rotate(-90deg);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+body[data-scan="settling"] .ring {
+  opacity: 1;
+}
+
+/* Scanning paused with the A key: the camera stays live, but the kiosk is
+   deliberately not reacting to it. */
+body[data-scanning="off"] .ring {
+  display: none;
+}
+
+body[data-scanning="off"] .hint {
+  color: #ffd28a;
+}
+
+body[data-scanning="off"] .corner {
+  border-color: rgba(255, 210, 138, 0.45);
+}
+
+.ring-track,
+.ring-value {
+  fill: none;
+  stroke-width: 8;
+}
+
+.ring-track {
+  stroke: rgba(255, 255, 255, 0.18);
+}
+
+.ring-value {
+  stroke: #ffffff;
+  stroke-linecap: round;
+  stroke-dasharray: 327; /* 2 * PI * 52 */
+  stroke-dashoffset: 327;
+  transition: stroke-dashoffset 0.12s linear;
+}
+
+.hint {
+  font-size: 1.5rem;
+  letter-spacing: 0.22em;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ---------- generating ---------- */
+
+.screen-process {
+  gap: 2.2rem;
+  background: #000;
+}
+
+.loader {
+  display: flex;
+  gap: 1rem;
+}
+
+.loader span {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: #f4f4f6;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.loader span:nth-child(2) { animation-delay: 0.18s; }
+.loader span:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+.process-title {
+  font-size: 2.4rem;
+  letter-spacing: 0.26em;
+  font-weight: 700;
+}
+
+.process-stage {
+  font-size: 1.2rem;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+}
+
+.detected-text {
+  min-height: 2.4rem;
+  font-size: 1.9rem;
+  letter-spacing: 0.06em;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.detected-text.is-visible {
+  opacity: 0.95;
+}
+
+/* ---------- handed off to the wall ---------- */
+
+.screen-sent {
+  gap: 1.4rem;
+  background: #000;
+  text-align: center;
+  padding: 4rem;
+}
+
+.sent-title {
+  font-size: 2.6rem;
+  letter-spacing: 0.24em;
+  font-weight: 700;
+}
+
+.sent-detail {
+  font-size: 1.4rem;
+  opacity: 0.6;
+  letter-spacing: 0.1em;
+}
+
+/* ---------- rejected: not a boat ---------- */
+
+.screen-reject {
+  gap: 1.6rem;
+  background: #000;
+  text-align: center;
+  padding: 4rem;
+}
+
+.reject-title {
+  font-size: 2.6rem;
+  letter-spacing: 0.22em;
+  font-weight: 700;
+}
+
+.reject-detail {
+  font-size: 1.5rem;
+  opacity: 0.65;
+  max-width: 50rem;
+}
+
+/* ---------- error ---------- */
+
+.screen-error {
+  gap: 1.4rem;
+  background: #000;
+  text-align: center;
+  padding: 4rem;
+}
+
+.error-title {
+  font-size: 2.2rem;
+  letter-spacing: 0.22em;
+  font-weight: 700;
+  color: #ffb4b4;
+}
+
+.error-detail {
+  font-size: 1.3rem;
+  opacity: 0.75;
+  max-width: 60rem;
+}
+
+.error-hint {
+  font-size: 1.1rem;
+  letter-spacing: 0.16em;
+  opacity: 0.45;
+}
+
+/* ---------- overlays ---------- */
+
+.notice {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: rgba(0, 0, 0, 0.88);
+  text-align: center;
+  padding: 4rem;
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+.notice-title {
+  font-size: 2rem;
+  letter-spacing: 0.22em;
+  font-weight: 700;
+  color: #ffd28a;
+}
+
+.notice-detail {
+  font-size: 1.3rem;
+  opacity: 0.75;
+}
+
+.flash {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.flash.is-firing {
+  animation: flash 0.4s ease-out;
+}
+
+@keyframes flash {
+  0%   { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* ==========================================================================
+   Screen 2 - display wall
+   ========================================================================== */
+
+.page-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+/* The canvas holds a fixed 1920x1080 image and is scaled to fit whatever it
+   is shown on, so the recording is the same size wherever it runs. */
+.stage-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* The background video feeds the canvas; it is never shown directly. It has to
+   stay in the document and playing, so it is hidden without display:none. */
+.offscreen-source {
+  position: fixed;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  left: -10px;
+  top: -10px;
+}
+
+.link-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 3vh;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1rem 2.4rem;
+  border-radius: 1.4rem;
+  background: rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+
+.link-notice[hidden] {
+  display: none;
+}
+
+.link-title {
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+  font-weight: 700;
+  color: #ffd28a;
+}
+
+.link-detail {
+  font-size: 0.95rem;
+  opacity: 0.7;
+}
+
+/* ==========================================================================
+   Screen 3 - download QR
+   ========================================================================== */
+
+.page-qr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 35%, #16242b 0%, #05080a 70%);
+}
+
+.qr-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.4rem;
+  padding: 4rem;
+  text-align: center;
+}
+
+.qr-title {
+  font-size: 2.6rem;
+  letter-spacing: 0.24em;
+  font-weight: 700;
+}
+
+.qr-frame {
+  padding: 1.6rem;
+  background: #ffffff;
+  border-radius: 1.6rem;
+  box-shadow: 0 1.2rem 4rem rgba(0, 0, 0, 0.55);
+}
+
+.qr-frame[hidden] {
+  display: none;
+}
+
+.qr-image {
+  display: block;
+  width: min(38vh, 22rem);
+  height: min(38vh, 22rem);
+  image-rendering: pixelated; /* keeps the modules crisp when scaled */
+}
+
+.qr-caption {
+  font-size: 1.4rem;
+  letter-spacing: 0.12em;
+  opacity: 0.75;
+}
+
+.qr-name {
+  font-size: 1.8rem;
+  opacity: 0.9;
+  min-height: 2.2rem;
+}
+
+/* ==========================================================================
+   Motion preferences
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .loader span,
+  .flash.is-firing {
+    animation: none;
+  }
+}
