@@ -2,7 +2,6 @@ import { EXTRACT } from './config.js';
 import { toLuminance, adaptiveInk, createCanvas, context2d } from './imaging.js';
 import { labelComponents } from './components.js';
 import { detectPaddles, erode, dilate } from './paddles.js';
-import { enhance, KIND } from './enhance.js';
 
 /**
  * Isolates the visitor's work from the cropped drawing area and returns it as
@@ -419,12 +418,6 @@ function extend(bounds, x, y) {
   return bounds;
 }
 
-/** Grown then shrunk back, which bridges gaps narrower than twice the radius. */
-function closeMask(mask, width, height, radius) {
-  const box = { minX: 0, minY: 0, maxX: width - 1, maxY: height - 1 };
-  return erode(dilate(mask, width, height, radius, box), width, height, radius, box);
-}
-
 function padBox(bounds, by, width, height) {
   return {
     minX: Math.max(0, bounds.minX - by),
@@ -616,18 +609,8 @@ function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, w
   const stack = new Int32Array(width * height);
   let top = 0;
 
-  // The flood is held back by a *closed* copy of the strokes, so a break in a
-  // pencil line is not a doorway it can walk through. Only the flood sees this;
-  // everything drawn below still comes from the strokes themselves, so no line
-  // is thickened and nothing the visitor drew changes shape.
-  const seal = Math.max(
-    1,
-    Math.round(Math.min(width, height) * EXTRACT.fill.sealGapRatio)
-  );
-  const walls = closeMask(strokes, width, height, seal);
-
   const push = (i) => {
-    if (!walls[i] && !outside[i]) {
+    if (!strokes[i] && !outside[i]) {
       outside[i] = 1;
       stack[top++] = i;
     }
@@ -857,11 +840,6 @@ function renderLayer({
   const softness = EXTRACT.softness;
   const { chromaThreshold, washMargin } = EXTRACT.fill;
 
-  // What each pixel is, for the finishing pass. Ink, colour, hull and writing
-  // all want different treatment, and this is the only place that still knows
-  // which is which.
-  const kinds = new Uint8Array(outW * outH);
-
   let inkPixels = 0;
 
   for (let y = 0; y < outH; y += 1) {
@@ -907,23 +885,18 @@ function renderLayer({
           chroma > chromaThreshold ||
           luma[si] < reference[si] - washMargin;
 
-        const at = y * outW + x;
-
         if (!keepOwn && painted) {
           dst[di] = painted.r;
           dst[di + 1] = painted.g;
           dst[di + 2] = painted.b;
-          kinds[at] = KIND.PAINT;
         } else if (own) {
           dst[di] = r;
           dst[di + 1] = g;
           dst[di + 2] = b;
-          kinds[at] = preserve && preserve[si] ? KIND.WRITING : KIND.STROKE;
         } else {
           dst[di] = meanInk.r;
           dst[di + 1] = meanInk.g;
           dst[di + 2] = meanInk.b;
-          kinds[at] = KIND.BODY;
         }
 
         dst[di + 3] = 255;
@@ -950,10 +923,6 @@ function renderLayer({
     }
   }
 
-  // Tidy the lines, deepen the visitor's own colours, and light it. Purely
-  // local arithmetic - no service, no model, nothing to wait for.
-  const finish = enhance(out, kinds);
-
   const canvas = createCanvas(outW, outH);
   context2d(canvas).putImageData(out, 0, 0);
 
@@ -961,7 +930,6 @@ function renderLayer({
     canvas,
     bounds: { x: x0, y: y0, width: outW, height: outH },
     inkRatio: inkPixels / (outW * outH),
-    finish,
   };
 }
 

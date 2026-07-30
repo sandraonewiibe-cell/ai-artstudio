@@ -201,21 +201,6 @@ export const EXTRACT = {
     hullShareRatio: 0.15,
 
     /**
-     * How wide a break in an outline still counts as a wall, as a fraction of
-     * the page's shorter side.
-     *
-     * A pencil line photographed on rough paper comes and goes, and a single
-     * missing pixel is a doorway: the flood that finds enclosed areas walks
-     * straight through it and decides the boat is not enclosed at all, so the
-     * hull never fills and arrives as a bare outline.
-     *
-     * The gap is bridged for the flood only. What actually gets drawn is still
-     * decided by the strokes the visitor made, so this closes the doorway
-     * without thickening a single line.
-     */
-    sealGapRatio: 0.002,
-
-    /**
      * Paper kept around writing drawn on the boat, as a fraction of the page's
      * shorter side.
      *
@@ -270,104 +255,6 @@ export const EXTRACT = {
      * halves come out very nearly the same colour).
      */
     hueBuckets: 12,
-  },
-};
-
-/**
- * Finishing the extracted drawing before it goes to the wall.
- *
- * Everything here is arithmetic over the pixels that were already extracted -
- * no service, no model, no network. That is not a shortcut, it is the only way
- * to meet the brief: a generative model cannot be told to leave a silhouette
- * alone, and a kiosk cannot wait seconds per visitor. This runs in single-digit
- * milliseconds and the boat that comes out is the boat that went in.
- *
- * Set `enabled: false` to send the extraction through untouched.
- */
-export const ENHANCE = {
-  enabled: true,
-
-  /**
-   * Tidying the line work.
-   *
-   * A pencil line photographed at an angle is ragged and comes and goes. These
-   * are all deliberately one or two pixels: enough to mend a stroke that broke
-   * over the grain of the paper, not enough to move anything the visitor drew.
-   */
-  line: {
-    // Islands smaller than this are camera grain that survived extraction.
-    despeckleArea: 10,
-
-    // Gaps up to twice this close up. 1 mends a broken stroke; 3 starts
-    // welding together things that were drawn apart.
-    closeRadius: 1,
-
-    // Soften the stair-stepping along edges. Alpha only, and only in the one
-    // pixel band where the shape meets the paper.
-    smoothEdges: true,
-
-    /**
-     * How far a notch may be filled in from the drawing's mirror image.
-     *
-     * This is the "improve symmetry slightly" dial, and it is small on purpose,
-     * because symmetry *is* silhouette - the two cannot both be left alone.
-     * A pixel is only added where the mirror has ink AND there is already ink
-     * within this many pixels, so it closes a nick in a gunwale and can never
-     * grow a second bow. Nothing is ever removed to make the boat symmetric.
-     *
-     * 0 turns it off entirely.
-     */
-    symmetryReach: 2,
-  },
-
-  /**
-   * Making the visitor's own colours read on a wall.
-   *
-   * Hue is never touched - not shifted, not averaged, not replaced. What
-   * changes is only how much of it there is: a pale, patchy, half-finished
-   * crayon becomes the same colour laid down properly.
-   */
-  colour: {
-    // How much of the way to full saturation a colour is pushed.
-    saturationBoost: 0.38,
-
-    // ...and a floor, so a nearly grey wash still arrives as a colour.
-    minSaturation: 0.3,
-
-    // Lightness is pulled into this band. Outside it, colour on a big screen
-    // reads as either white or black rather than as paint.
-    minLightness: 0.3,
-    maxLightness: 0.62,
-  },
-
-  /**
-   * Wood, light and depth.
-   *
-   * The grain field is built once, on the first visitor, and reused by every
-   * visitor after - it is the one part of this that is worth caching, and it
-   * costs nothing to keep.
-   */
-  material: {
-    // Depth of the grain, as a share of lightness. Subtle: this is a boat with
-    // a grain, not a plank.
-    grainStrength: 0.11,
-
-    // Grain runs along the hull: stretched hard across x, tight down y.
-    grainScaleX: 0.011,
-    grainScaleY: 0.2,
-
-    // Size of the cached noise field, in cells.
-    grainField: 256,
-
-    // Light from above. The top of the hull catches it, the bottom falls away.
-    lightTop: 1.13,
-    lightBottom: 0.85,
-
-    // Inner shadow: how far in from the edge it reaches, in pixels, and how
-    // dark it gets there. This is what stops the boat reading as a flat
-    // sticker cut out of the background.
-    shadowDepth: 7,
-    shadowStrength: 0.28,
   },
 };
 
