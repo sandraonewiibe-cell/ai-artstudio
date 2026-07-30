@@ -239,6 +239,22 @@ export const EXTRACT = {
     // Below this share of the page, a patch of colour is a stray mark rather
     // than an area that was coloured in, and is left exactly as it is.
     minAreaRatio: 0.0004,
+
+    /**
+     * How many hues are told apart.
+     *
+     * Areas are found per hue rather than by shape alone. A red hull coloured
+     * right up against a blue sail is one connected patch of colour, and
+     * averaging it would give both of them the same muddy purple; split by hue
+     * first, they are two areas and each keeps its own colour.
+     *
+     * 12 buckets is 30 degrees each - wide enough that one crayon stays in one
+     * bucket as its pressure varies, narrow enough to separate colours anyone
+     * would call different. Raise it to tell closer colours apart, at the cost
+     * of one crayon sometimes splitting across two buckets (harmless: both
+     * halves come out very nearly the same colour).
+     */
+    hueBuckets: 12,
   },
 };
 

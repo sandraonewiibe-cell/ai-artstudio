@@ -201,7 +201,7 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
  */
 function paintedRegions(page, width, height, bounds) {
   const { chromaThreshold } = EXTRACT.fill;
-  const { closeRatio, minAreaRatio } = EXTRACT.paint;
+  const { closeRatio, minAreaRatio, hueBuckets } = EXTRACT.paint;
 
   const empty = {
     mask: new Uint8Array(width * height),
@@ -220,8 +220,11 @@ function paintedRegions(page, width, height, bounds) {
     maxY: Math.min(height - 1, bounds.maxY + pad),
   };
 
-  const coloured = new Uint8Array(width * height);
-  let any = 0;
+  // Sorted by hue first. Two colours side by side are one connected patch of
+  // colour, and closing them together would hand both the average of the two.
+  const bucketOf = new Int16Array(width * height).fill(-1);
+  const tally = new Array(hueBuckets).fill(0);
+  const extent = new Array(hueBuckets).fill(null);
 
   for (let y = box.minY; y <= box.maxY; y += 1) {
     for (let x = box.minX; x <= box.maxX; x += 1) {
@@ -230,54 +233,198 @@ function paintedRegions(page, width, height, bounds) {
       const g = page.data[i * 4 + 1];
       const b = page.data[i * 4 + 2];
 
-      if (Math.max(r, g, b) - Math.min(r, g, b) > chromaThreshold) {
-        coloured[i] = 1;
-        any += 1;
-      }
+      if (Math.max(r, g, b) - Math.min(r, g, b) <= chromaThreshold) continue;
+
+      const k = hueBucket(r, g, b, hueBuckets);
+      bucketOf[i] = k;
+      tally[k] += 1;
+      extent[k] = extend(extent[k], x, y);
     }
   }
 
-  if (!any) return empty;
-
-  const closed = erode(dilate(coloured, width, height, radius, box), width, height, radius, box);
-
-  const { components, labels } = labelComponents(closed, width, height);
   const floor = width * height * minAreaRatio;
-  const areas = components.filter((c) => c.area >= floor);
-  if (!areas.length) return empty;
-
-  const index = new Map();
-  areas.forEach((c, i) => index.set(c.label, i));
-
-  const totals = areas.map(() => ({ r: 0, g: 0, b: 0, n: 0 }));
   const region = new Int32Array(width * height).fill(-1);
   const mask = new Uint8Array(width * height);
+  const colours = [];
 
-  for (let i = 0; i < closed.length; i += 1) {
-    if (!closed[i]) continue;
+  for (let k = 0; k < hueBuckets; k += 1) {
+    // Not enough of this hue anywhere on the page to be an area at all.
+    if (tally[k] < floor) continue;
 
-    const k = index.get(labels[i]);
-    if (k === undefined) continue;
+    // Confined to where this hue actually is. Closing the whole page once per
+    // hue would be several times the work for pixels known to be blank, and
+    // this runs while the visitor is standing there.
+    const work = padBox(extent[k], radius + 2, width, height);
 
-    region[i] = k;
-    mask[i] = 1;
-
-    // Averaged over the crayon only. Including the pits would drag every
-    // colour towards the paper and come out washed out.
-    if (coloured[i]) {
-      const total = totals[k];
-      total.r += page.data[i * 4];
-      total.g += page.data[i * 4 + 1];
-      total.b += page.data[i * 4 + 2];
-      total.n += 1;
+    const seed = new Uint8Array(width * height);
+    for (let y = work.minY; y <= work.maxY; y += 1) {
+      for (let x = work.minX; x <= work.maxX; x += 1) {
+        const i = y * width + x;
+        if (bucketOf[i] === k) seed[i] = 1;
+      }
     }
+
+    const closed = erode(dilate(seed, width, height, radius, work), width, height, radius, work);
+    const { components, labels } = labelComponents(closed, width, height);
+
+    components
+      .filter((c) => c.area >= floor)
+      .forEach((c) => {
+        const index = colours.length;
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let n = 0;
+        let claimed = 0;
+
+        for (let y = c.minY; y <= c.maxY; y += 1) {
+          for (let x = c.minX; x <= c.maxX; x += 1) {
+            const i = y * width + x;
+            if (labels[i] !== c.label) continue;
+
+            // Where two hues overlap after closing, the first one keeps it.
+            if (region[i] !== -1) continue;
+
+            region[i] = index;
+            mask[i] = 1;
+            claimed += 1;
+
+            // Averaged over the crayon only. Including the pits would drag
+            // every colour towards the paper and come out washed out.
+            if (bucketOf[i] === k) {
+              r += page.data[i * 4];
+              g += page.data[i * 4 + 1];
+              b += page.data[i * 4 + 2];
+              n += 1;
+            }
+          }
+        }
+
+        if (!claimed) return;
+
+        colours.push(
+          n
+            ? { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) }
+            : { r: 0, g: 0, b: 0 }
+        );
+      });
   }
 
-  const colours = totals.map((t) =>
-    t.n ? { r: Math.round(t.r / t.n), g: Math.round(t.g / t.n), b: Math.round(t.b / t.n) } : null
-  );
+  if (!colours.length) return empty;
+
+  closeEdgePits(region, mask, colours.length, width, height, box, radius);
 
   return { mask, region, colours };
+}
+
+/**
+ * Pits the closing could not reach.
+ *
+ * Growing the colour and shrinking it back covers the pits in the middle of an
+ * area, but one within a stroke's width of the edge gets uncovered again by the
+ * shrink, and comes out as a speck of boat in the middle of the colour.
+ *
+ * A gap with colour on nearly every side belongs to that colour. The threshold
+ * is what keeps this from running away: five of eight neighbours means it is
+ * surrounded, and a pixel of open paper alongside the area has colour on three
+ * sides at most, so the fill cannot escape across the page.
+ */
+function closeEdgePits(region, mask, count, width, height, box, rounds) {
+  const votes = new Int32Array(count);
+
+  for (let pass = 0; pass < rounds; pass += 1) {
+    const joined = [];
+
+    for (let y = Math.max(1, box.minY); y < Math.min(height - 1, box.maxY); y += 1) {
+      for (let x = Math.max(1, box.minX); x < Math.min(width - 1, box.maxX); x += 1) {
+        const i = y * width + x;
+        if (region[i] !== -1) continue;
+
+        let neighbours = 0;
+        let best = -1;
+        let bestVotes = 0;
+
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (!dx && !dy) continue;
+
+            const r = region[(y + dy) * width + (x + dx)];
+            if (r === -1) continue;
+
+            neighbours += 1;
+            votes[r] += 1;
+            if (votes[r] > bestVotes) {
+              bestVotes = votes[r];
+              best = r;
+            }
+          }
+        }
+
+        if (neighbours >= 5) joined.push(i, best);
+
+        // Only the entries touched need clearing.
+        if (neighbours) {
+          for (let dy = -1; dy <= 1; dy += 1) {
+            for (let dx = -1; dx <= 1; dx += 1) {
+              if (!dx && !dy) continue;
+              const r = region[(y + dy) * width + (x + dx)];
+              if (r !== -1) votes[r] = 0;
+            }
+          }
+        }
+      }
+    }
+
+    if (!joined.length) return;
+
+    for (let j = 0; j < joined.length; j += 2) {
+      region[joined[j]] = joined[j + 1];
+      mask[joined[j]] = 1;
+    }
+  }
+}
+
+/**
+ * Which hue a colour belongs to, as a bucket index.
+ *
+ * Hue rather than the raw channels, so that the same crayon pressed lightly
+ * and heavily lands in one place. Only ever asked about pixels that already
+ * have real colour in them, so the hue is meaningful.
+ */
+function hueBucket(r, g, b, buckets) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  if (!chroma) return 0;
+
+  let hue;
+  if (max === r) hue = (g - b) / chroma;
+  else if (max === g) hue = (b - r) / chroma + 2;
+  else hue = (r - g) / chroma + 4;
+
+  hue = ((hue % 6) + 6) % 6; // 0..6, the six sectors of the colour wheel
+
+  return Math.min(buckets - 1, Math.floor((hue / 6) * buckets));
+}
+
+function extend(bounds, x, y) {
+  if (!bounds) return { minX: x, maxX: x, minY: y, maxY: y };
+
+  if (x < bounds.minX) bounds.minX = x;
+  if (x > bounds.maxX) bounds.maxX = x;
+  if (y < bounds.minY) bounds.minY = y;
+  if (y > bounds.maxY) bounds.maxY = y;
+
+  return bounds;
+}
+
+function padBox(bounds, by, width, height) {
+  return {
+    minX: Math.max(0, bounds.minX - by),
+    minY: Math.max(0, bounds.minY - by),
+    maxX: Math.min(width - 1, bounds.maxX + by),
+    maxY: Math.min(height - 1, bounds.maxY + by),
+  };
 }
 
 /** Crop box for a set of bounds, with breathing room, clamped to the page. */
@@ -715,26 +862,37 @@ function renderLayer({
         // is what makes writing on the boat come out as written: the letters
         // in their own ink, on the paper they were written on.
         const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+
+        // A coloured-in area comes out as one solid colour, across the whole of
+        // it. Photographed crayon is never one colour - it is darker where the
+        // hand pressed, lighter where it skipped, and bare paper in the pits of
+        // the grain - and reproducing all that faithfully is what made a
+        // filled-in boat look grubby rather than filled in. The visitor's
+        // meaning was "this part is red", so it is that red throughout.
+        const area = paint ? paint.region[si] : -1;
+        const painted = area >= 0 ? paint.colours[area] : null;
+
+        // A line drawn over the top still shows. Pencil and pen have almost no
+        // chroma, so they are told from the crayon by colour rather than by
+        // darkness - which matters, because a heavy crayon is darker than a
+        // light pencil and darkness alone would keep the wrong one.
+        const drawnOver = strokes[si] && chroma <= chromaThreshold;
+        const keepOwn = (preserve && preserve[si]) || drawnOver;
+
         const own =
-          (preserve && preserve[si]) ||
+          keepOwn ||
           strokes[si] ||
           chroma > chromaThreshold ||
           luma[si] < reference[si] - washMargin;
 
-        // Bare paper inside a coloured-in area is a pit the crayon missed, not
-        // a gap the visitor left. It takes that area's colour, so what was
-        // coloured in arrives coloured in, and not speckled with boat.
-        const area = paint && paint.region[si];
-        const filled = !own && area >= 0 ? paint.colours[area] : null;
-
-        if (own) {
+        if (!keepOwn && painted) {
+          dst[di] = painted.r;
+          dst[di + 1] = painted.g;
+          dst[di + 2] = painted.b;
+        } else if (own) {
           dst[di] = r;
           dst[di + 1] = g;
           dst[di + 2] = b;
-        } else if (filled) {
-          dst[di] = filled.r;
-          dst[di + 1] = filled.g;
-          dst[di + 2] = filled.b;
         } else {
           dst[di] = meanInk.r;
           dst[di + 1] = meanInk.g;
