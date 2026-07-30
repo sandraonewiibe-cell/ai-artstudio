@@ -14,3 +14,7 @@ generated/videos/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Admin panel uploads and settings
+media/
+data/

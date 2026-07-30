@@ -2,6 +2,7 @@ import { DISPLAY } from './js/config.js';
 import { Stage } from './js/stage.js';
 import { Recorder, blobToDataUrl } from './js/recorder.js';
 import { connect } from './js/bus.js';
+import { createOverlay } from './js/overlay.js';
 
 /**
  * Screen 2 - the LED wall.
@@ -20,6 +21,11 @@ const linkDetail = document.getElementById('linkDetail');
 const stage = new Stage(canvas, backgroundSource);
 const recorder = new Recorder(canvas, { fps: 30 });
 
+// The organiser's logos and advertisements, in front of the canvas rather than
+// painted into it - so they are never in the clip the visitor takes home, and
+// the boat's own drawing code is untouched by any of it.
+const overlay = createOverlay();
+
 /** One session at a time; a result arriving mid-playback waits its turn. */
 let busy = false;
 const queue = [];
@@ -34,6 +40,7 @@ const RECORD_MS = Math.min(DISPLAY.recordMs, DISPLAY.holdMs);
 
 async function play(job) {
   busy = true;
+  overlay.setBusy(true); // an advertisement must never cover a boat
 
   try {
     await stage.show(job);
@@ -58,6 +65,7 @@ async function play(job) {
     busy = false;
     const next = queue.shift();
     if (next) play(next);
+    else overlay.setBusy(false);
   }
 }
 
@@ -111,16 +119,43 @@ function wait(ms) {
 
 connect(
   (event) => {
+    // Saved in the admin panel: applied here on the spot, on the connection
+    // that is already open for boats. Nothing restarts and nothing reloads.
+    if (event.type === 'settings' && event.settings) {
+      overlay.apply(event.settings);
+      return;
+    }
+
     if (event.type !== 'result' || !event.job) return;
 
     if (busy) queue.push(event.job);
     else play(event.job);
   },
   {
-    onOpen: () => showNotice(false),
+    onOpen: () => {
+      showNotice(false);
+      // Also on reconnect, in case the panel was saved while this wall was
+      // away - the event that carried it would have been missed.
+      loadSettings();
+    },
     onDown: () => showNotice(true, 'Reconnecting to the scanner…'),
   }
 );
+
+/** What to show, at startup and after any reconnect. */
+async function loadSettings() {
+  try {
+    const response = await fetch('/api/settings');
+    if (!response.ok) throw new Error(`Server returned ${response.status}`);
+
+    overlay.apply(await response.json());
+  } catch (err) {
+    // The wall keeps working without them; they are decoration, not the show.
+    console.warn('[display] could not load display settings:', err.message);
+  }
+}
+
+loadSettings();
 
 // Autoplay is allowed because the video is muted; without it the canvas would
 // draw a still first frame forever.

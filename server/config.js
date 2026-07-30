@@ -57,6 +57,10 @@ module.exports = {
     windowMs: num(process.env.RATE_LIMIT_WINDOW_MS, 60 * 1000),
     sessions: num(process.env.RATE_LIMIT_SESSIONS, 12),
     recordings: num(process.env.RATE_LIMIT_RECORDINGS, 20),
+
+    // The panel is one person clicking save, so this is generous for them and
+    // still a ceiling on anyone who finds the upload endpoint.
+    admin: num(process.env.RATE_LIMIT_ADMIN, 60),
   },
 
   /**
@@ -102,6 +106,18 @@ module.exports = {
   // Decides whether the visitor drew a boat; only boats reach the provider.
   classifier: process.env.CLASSIFIER || 'mock',
 
+  /**
+   * Password for /admin, if there is to be one.
+   *
+   * Unset means the panel is open, which is right on a kiosk on a table with
+   * nobody else on the network. Set it the moment the kiosk is reachable from
+   * outside: the panel writes files to disk, and an upload endpoint anyone can
+   * reach is an upload endpoint anyone will find.
+   *
+   * Reading the settings is never gated - the display screen needs them.
+   */
+  adminToken: process.env.ADMIN_TOKEN || '',
+
   paths: {
     root: ROOT,
     client: path.join(ROOT, 'client'),
@@ -109,6 +125,12 @@ module.exports = {
     uploads: path.join(ROOT, 'uploads'),
     images: path.join(ROOT, 'generated', 'images'),
     videos: path.join(ROOT, 'generated', 'videos'), // reserved for a later version
+
+    // Logos and advertisements, and the settings that point at them. Both sit
+    // outside the folders the retention sweep clears: a visitor's capture is a
+    // leftover after a day, an organiser's logo is not.
+    media: path.join(ROOT, 'media'),
+    data: path.join(ROOT, 'data'),
   },
 
   // A visitor's generation must finish inside this window or the job fails and
@@ -138,5 +160,12 @@ module.exports = {
       process.env.MAX_SESSION_UPLOAD_SIZE || process.env.MAX_UPLOAD_SIZE || '30mb',
     recording:
       process.env.MAX_RECORDING_UPLOAD_SIZE || process.env.MAX_UPLOAD_SIZE || '30mb',
+
+    // A logo is small; an advertisement can be a video.
+    media: process.env.MAX_MEDIA_UPLOAD_SIZE || '40mb',
+
+    // The settings themselves are a few hundred bytes of JSON. Nothing that
+    // arrives at that endpoint has any business being larger.
+    settings: '256kb',
   },
 };

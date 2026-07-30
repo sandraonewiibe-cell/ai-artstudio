@@ -7,6 +7,7 @@ const pipeline = require('./pipeline');
 const events = require('./events');
 const recordings = require('./recordings');
 const ratelimit = require('./ratelimit');
+const settings = require('./settings');
 const { publicBase, candidates } = require('./network');
 
 const app = express();
@@ -46,6 +47,33 @@ const recordingLimit = ratelimit.limit({
   windowMs: config.rateLimit.windowMs,
 });
 
+const settingsBody = express.json({ limit: config.uploads.settings });
+const mediaBody = express.json({ limit: config.uploads.media });
+
+const adminLimit = ratelimit.limit({
+  name: 'admin',
+  max: config.rateLimit.admin,
+  windowMs: config.rateLimit.windowMs,
+});
+
+/**
+ * Guards the endpoints that write.
+ *
+ * Open when no token is configured, which is what a kiosk on its own table
+ * wants - there is nobody to type a password and nobody who could reach it.
+ * The moment ADMIN_TOKEN is set, saving settings and uploading media need it.
+ * Reading is never gated: the display screen has to be able to fetch what it
+ * is meant to show.
+ */
+function adminOnly(req, res, next) {
+  if (!config.adminToken) return next();
+
+  const given = req.get('X-Admin-Token');
+  if (given === config.adminToken) return next();
+
+  return res.status(401).json({ error: 'Admin token required.' });
+}
+
 // --- pages ------------------------------------------------------------------
 // Three screens, three URLs:
 //   /         scanner   - the camera, on the machine by the table
@@ -60,11 +88,17 @@ app.get('/qr', (req, res) => {
   res.sendFile(path.join(config.paths.client, 'qr.html'));
 });
 
+// ...and a fourth for whoever is running the exhibition, which no visitor sees.
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(config.paths.client, 'admin.html'));
+});
+
 app.use(express.static(config.paths.client));
 
 // Static asset / output folders
 app.use('/assets', express.static(config.paths.assets));
 app.use('/uploads', express.static(config.paths.uploads));
+app.use('/media', express.static(config.paths.media));
 app.use('/generated', express.static(path.join(config.paths.root, 'generated')));
 
 // --- api --------------------------------------------------------------------
@@ -140,6 +174,74 @@ app.get('/api/recordings/latest', (req, res) => {
   return res.json(record);
 });
 
+// --- admin ------------------------------------------------------------------
+// The logos on the wall and the advertisements between boats. None of this
+// touches a session: the scanner, the reading, the generation and the QR run
+// exactly as they did whether these are set or not.
+
+/** What the display should be showing. Read by the wall, so never gated. */
+app.get('/api/settings', (req, res) => {
+  res.json(settings.get());
+});
+
+/**
+ * Replaces the settings, and tells the screens at once.
+ *
+ * The broadcast is what makes the panel live: the display is already holding an
+ * event stream open for boats, so a settings change reaches it on the same
+ * connection and takes effect on the next frame. Nothing restarts.
+ */
+app.put('/api/settings', adminLimit, adminOnly, settingsBody, (req, res) => {
+  try {
+    const saved = settings.save(req.body);
+    events.broadcast('settings', { settings: saved });
+
+    console.log(
+      `[admin] settings saved: logos ${describeLogos(saved)}, ` +
+        `ads ${saved.ads.enabled ? `${saved.ads.items.length} item(s)` : 'off'}`
+    );
+
+    return res.json(saved);
+  } catch (err) {
+    console.error('[admin] could not save settings:', err);
+    return res.status(500).json({ error: 'Could not save settings.' });
+  }
+});
+
+/** Takes a logo or an advertisement and returns the URL to point at it. */
+app.post('/api/media', adminLimit, adminOnly, mediaBody, (req, res) => {
+  try {
+    if (!req.body || !req.body.data) {
+      return res.status(400).json({ error: 'Missing "data".' });
+    }
+
+    const { buffer, mime, ext } = storage.decodeMediaDataUrl(req.body.data);
+    if (!buffer.length) return res.status(400).json({ error: 'That file was empty.' });
+
+    // The name is ours, not the browser's: a filename from outside is a path
+    // waiting to escape the folder it was meant for.
+    const kind = req.body.kind === 'logo' ? 'logo' : 'ad';
+    const name = `${kind}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}.${ext}`;
+
+    const saved = storage.save('media', name, buffer);
+    console.log(`[admin] stored ${name} (${Math.round(buffer.length / 1024)}KB)`);
+
+    return res.status(201).json({
+      url: saved.url,
+      type: mime.startsWith('video/') ? 'video' : 'image',
+      bytes: buffer.length,
+    });
+  } catch (err) {
+    console.error('[admin] upload failed:', err);
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+function describeLogos(saved) {
+  const on = ['left', 'right'].filter((side) => saved.logos[side].enabled);
+  return on.length ? on.join(' + ') : 'off';
+}
+
 /** QR code as a PNG, rendered server-side so the QR page needs no library. */
 app.get('/api/qr', async (req, res) => {
   const text = req.query.data;
@@ -180,7 +282,12 @@ app.use((err, req, res, next) => {
 });
 
 // Make sure output folders exist before the first visitor.
-['uploads', 'images', 'videos'].forEach((kind) => storage.ensureDir(config.paths[kind]));
+['uploads', 'images', 'videos', 'media', 'data'].forEach((kind) =>
+  storage.ensureDir(config.paths[kind])
+);
+
+// Read the organiser's settings once at boot; saves keep it current after that.
+settings.load();
 
 const server = app.listen(config.port, config.host, () => {
   const base = publicBase(config.port);

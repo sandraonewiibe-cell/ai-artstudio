@@ -454,3 +454,52 @@ body[data-scanning="off"] .corner {
     animation: none;
   }
 }
+
+/* --- the organiser's overlay, on the display wall --------------------------
+   Logos and advertisements set from /admin. In front of the canvas rather than
+   painted into it, so none of this reaches the clip the visitor downloads and
+   the boat's own drawing code never has to know about it. */
+
+.wall-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.wall-logo {
+  position: absolute;
+  top: 3vh;
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 12px rgba(0, 0, 0, 0.55));
+}
+
+.wall-logo.is-left { left: 3vw; }
+.wall-logo.is-right { right: 3vw; }
+
+.wall-ad {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+.wall-ad.is-visible { opacity: 1; }
+
+.wall-ad img,
+.wall-ad video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wall-ad[data-placement='fullscreen'] { inset: 0; }
+.wall-ad[data-placement='top'] { top: 0; left: 0; right: 0; height: 22vh; }
+.wall-ad[data-placement='bottom'] { bottom: 0; left: 0; right: 0; height: 22vh; }
+.wall-ad[data-placement='left'] { top: 0; bottom: 0; left: 0; width: 22vw; }
+.wall-ad[data-placement='right'] { top: 0; bottom: 0; right: 0; width: 22vw; }

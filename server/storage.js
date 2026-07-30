@@ -52,7 +52,7 @@ function ensureDir(dir) {
  * Writes a buffer and returns both the absolute path and the URL the client
  * can fetch it from.
  *
- * @param {'uploads'|'images'|'videos'} kind
+ * @param {'uploads'|'images'|'videos'|'media'} kind
  * @param {string} filename
  * @param {Buffer} buffer
  */
@@ -64,9 +64,15 @@ function save(kind, filename, buffer) {
   const filePath = path.join(dir, filename);
   fs.writeFileSync(filePath, buffer);
 
-  const urlBase = kind === 'uploads' ? '/uploads' : `/generated/${kind}`;
+  const urlBase = URL_BASE[kind] || `/generated/${kind}`;
   return { path: filePath, url: `${urlBase}/${filename}` };
 }
+
+/** Where each kind is served from. Anything else lives under /generated. */
+const URL_BASE = {
+  uploads: '/uploads',
+  media: '/media',
+};
 
 /**
  * Deletes files older than the configured retention window. An exhibition
