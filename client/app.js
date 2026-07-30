@@ -213,10 +213,14 @@ async function runSession(quad, insetRatio) {
     }
 
     const t3 = performance.now();
+    const finish = drawing && drawing.finish;
     console.log(
       `[app] capture ${Math.round(t3 - t0)}ms ` +
         `(warp ${Math.round(t1 - t0)}, extract ${Math.round(t2 - t1)}, ` +
-        `encode ${Math.round(t3 - t2)})`
+        `encode ${Math.round(t3 - t2)})` +
+        (finish && finish.applied
+          ? ` finish ${finish.ms.toFixed(1)}ms, mended ${finish.mended}px, dropped ${finish.removed}px`
+          : '')
     );
 
     const session = await createSession(payload);
