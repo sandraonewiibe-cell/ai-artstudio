@@ -1,7 +1,7 @@
 import { EXTRACT } from './config.js';
 import { toLuminance, adaptiveInk, createCanvas, context2d } from './imaging.js';
 import { labelComponents } from './components.js';
-import { detectPaddles } from './paddles.js';
+import { detectPaddles, erode, dilate } from './paddles.js';
 
 /**
  * Isolates the visitor's work from the cropped drawing area and returns it as
@@ -96,9 +96,16 @@ export function extractDrawing(pageCanvas) {
   const drawingBounds = unionBounds(kept);
   const rect = cropRect(drawingBounds, width, height);
 
+  // Areas the visitor coloured in, closed up so the paper showing through the
+  // crayon is treated as coloured too. These count as part of the drawing
+  // whether or not the boat encloses them - somebody who colours past the
+  // outline still coloured it.
+  const paint = paintedRegions(page, width, height, drawingBounds);
+  for (let i = 0; i < fill.length; i += 1) if (paint.mask[i]) fill[i] = 1;
+
   const base = { page, luma, strokes, width, height, reference, meanInk };
 
-  const rendered = renderLayer({ ...base, fill, preserve, rect });
+  const rendered = renderLayer({ ...base, fill, preserve, paint, rect });
   if (!rendered) return null;
 
   return {
@@ -169,6 +176,108 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
   if (!measured.length) return null;
 
   return { paddles: measured };
+}
+
+/**
+ * The areas the visitor coloured in, and what colour each of them is.
+ *
+ * Colour is found by chroma rather than by darkness, the same test used
+ * elsewhere: a pale yellow crayon and white paper are almost identical in
+ * brightness and nothing alike in colour.
+ *
+ * The part that matters is what happens next. Raw, a coloured-in area is not a
+ * region - it is thousands of specks of colour with paper between them, because
+ * crayon sits on the tooth of the paper and misses the pits. Closing it -
+ * growing the colour by a few pixels and then shrinking it back - swallows
+ * those pits while leaving the outline of the area where the visitor put it.
+ * The area then gets one colour, averaged over the pixels that actually had
+ * colour in them, so the pits take the colour of the crayon around them
+ * instead of staying bare.
+ *
+ * @returns {{mask: Uint8Array, region: Int32Array, colours: {r,g,b}[]}}
+ *   mask   1 where a pixel belongs to a coloured-in area
+ *   region which area, or -1
+ *   colours the colour of each area
+ */
+function paintedRegions(page, width, height, bounds) {
+  const { chromaThreshold } = EXTRACT.fill;
+  const { closeRatio, minAreaRatio } = EXTRACT.paint;
+
+  const empty = {
+    mask: new Uint8Array(width * height),
+    region: new Int32Array(width * height).fill(-1),
+    colours: [],
+  };
+
+  const radius = Math.max(1, Math.round(Math.min(width, height) * closeRatio));
+
+  // Room for the closing to work in without the box edge eroding the result.
+  const pad = radius + 2;
+  const box = {
+    minX: Math.max(0, bounds.minX - pad),
+    minY: Math.max(0, bounds.minY - pad),
+    maxX: Math.min(width - 1, bounds.maxX + pad),
+    maxY: Math.min(height - 1, bounds.maxY + pad),
+  };
+
+  const coloured = new Uint8Array(width * height);
+  let any = 0;
+
+  for (let y = box.minY; y <= box.maxY; y += 1) {
+    for (let x = box.minX; x <= box.maxX; x += 1) {
+      const i = y * width + x;
+      const r = page.data[i * 4];
+      const g = page.data[i * 4 + 1];
+      const b = page.data[i * 4 + 2];
+
+      if (Math.max(r, g, b) - Math.min(r, g, b) > chromaThreshold) {
+        coloured[i] = 1;
+        any += 1;
+      }
+    }
+  }
+
+  if (!any) return empty;
+
+  const closed = erode(dilate(coloured, width, height, radius, box), width, height, radius, box);
+
+  const { components, labels } = labelComponents(closed, width, height);
+  const floor = width * height * minAreaRatio;
+  const areas = components.filter((c) => c.area >= floor);
+  if (!areas.length) return empty;
+
+  const index = new Map();
+  areas.forEach((c, i) => index.set(c.label, i));
+
+  const totals = areas.map(() => ({ r: 0, g: 0, b: 0, n: 0 }));
+  const region = new Int32Array(width * height).fill(-1);
+  const mask = new Uint8Array(width * height);
+
+  for (let i = 0; i < closed.length; i += 1) {
+    if (!closed[i]) continue;
+
+    const k = index.get(labels[i]);
+    if (k === undefined) continue;
+
+    region[i] = k;
+    mask[i] = 1;
+
+    // Averaged over the crayon only. Including the pits would drag every
+    // colour towards the paper and come out washed out.
+    if (coloured[i]) {
+      const total = totals[k];
+      total.r += page.data[i * 4];
+      total.g += page.data[i * 4 + 1];
+      total.b += page.data[i * 4 + 2];
+      total.n += 1;
+    }
+  }
+
+  const colours = totals.map((t) =>
+    t.n ? { r: Math.round(t.r / t.n), g: Math.round(t.g / t.n), b: Math.round(t.b / t.n) } : null
+  );
+
+  return { mask, region, colours };
 }
 
 /** Crop box for a set of bounds, with breathing room, clamped to the page. */
@@ -570,7 +679,7 @@ function unionBounds(components) {
  * hull, and the paper immediately around and inside it.
  */
 function renderLayer({
-  page, luma, strokes, fill, width, height, reference, meanInk, rect, preserve,
+  page, luma, strokes, fill, width, height, reference, meanInk, rect, preserve, paint,
 }) {
   const { x0, y0, x1, y1 } = rect;
 
@@ -606,15 +715,32 @@ function renderLayer({
         // is what makes writing on the boat come out as written: the letters
         // in their own ink, on the paper they were written on.
         const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-        const coloured =
+        const own =
           (preserve && preserve[si]) ||
           strokes[si] ||
           chroma > chromaThreshold ||
           luma[si] < reference[si] - washMargin;
 
-        dst[di] = coloured ? r : meanInk.r;
-        dst[di + 1] = coloured ? g : meanInk.g;
-        dst[di + 2] = coloured ? b : meanInk.b;
+        // Bare paper inside a coloured-in area is a pit the crayon missed, not
+        // a gap the visitor left. It takes that area's colour, so what was
+        // coloured in arrives coloured in, and not speckled with boat.
+        const area = paint && paint.region[si];
+        const filled = !own && area >= 0 ? paint.colours[area] : null;
+
+        if (own) {
+          dst[di] = r;
+          dst[di + 1] = g;
+          dst[di + 2] = b;
+        } else if (filled) {
+          dst[di] = filled.r;
+          dst[di + 1] = filled.g;
+          dst[di + 2] = filled.b;
+        } else {
+          dst[di] = meanInk.r;
+          dst[di + 1] = meanInk.g;
+          dst[di + 2] = meanInk.b;
+        }
+
         dst[di + 3] = 255;
 
         inkPixels += 1;

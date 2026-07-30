@@ -342,11 +342,14 @@ function open(mask, width, height, radius, box) {
  * skips the blank margins entirely - together the difference between a
  * noticeable pause and none at all.
  */
-function erode(mask, width, height, radius, box) {
+// Exported because closing up a coloured-in area needs exactly the same two
+// operations, and a second copy of a separable min/max filter is not worth
+// having. See paintedRegions() in extract.js.
+export function erode(mask, width, height, radius, box) {
   return morph(mask, width, height, radius, false, box);
 }
 
-function dilate(mask, width, height, radius, box) {
+export function dilate(mask, width, height, radius, box) {
   return morph(mask, width, height, radius, true, box);
 }
 

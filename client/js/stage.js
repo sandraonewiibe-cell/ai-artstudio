@@ -228,7 +228,7 @@ export class Stage {
       // where they were drawn. This only works out where their blades are and
       // lets the water react to them.
       if (this.paddles.length) {
-        this.workTheWater(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
+        this.workTheWater(centreX, centreY, boatW, boatH, tilt, lift, elapsed);
       }
     }
 
@@ -251,29 +251,34 @@ export class Stage {
    * though nothing about the drawing moves. It runs for as long as the boat is
    * on screen; there is no stroke count and nothing winds down.
    *
-   * The blade takes the displacement its own slice of the hull has, so it stays
-   * with the boat as the swell passes under it and the splash lands where the
-   * oar actually is.
+   * The splash comes off the water, not off the drawing. The oar says *where*
+   * along the boat it enters - that is all the scan is used for - and the
+   * height comes from the surface itself, so the droplets break at the
+   * waterline the way spray does. Taking the height from the drawing instead
+   * put the splash wherever the visitor happened to end their pencil stroke,
+   * which was usually somewhere up in the air on the hull.
    */
-  workTheWater(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
+  workTheWater(centreX, centreY, boatW, boatH, tilt, lift, elapsed) {
     const { periodMs, lagPerOar, catchPhase } = PADDLES.stroke;
+
+    // Where this boat is sitting in the water, the same line the ripples use.
+    const waterline = centreY + boatH / 2;
 
     this.paddles.forEach((paddle, index) => {
       const phase = wrap(elapsed / periodMs - index * lagPerOar);
 
       if (crossed(paddle.lastPhase, phase, catchPhase)) {
-        // Local frame: the drawing's box runs from -boatW/2 to +boatW/2.
+        // Local frame: the drawing's box runs from -boatW/2 to +boatW/2. Only
+        // the horizontal position is taken from the oar.
         const tipX = -boatW / 2 + paddle.tip.x * boatW;
         const tipY = -boatH / 2 + paddle.tip.y * boatH;
+        const bladeX = centreX + tipX * Math.cos(tilt) - tipY * Math.sin(tilt);
 
-        const ride =
-          (this.waveAt(centreX + tipX, elapsed) - (lift + slope * tipX)) * WAVES.flex;
-        const bladeY = tipY + ride;
+        // ...and the surface of the sea at that point provides the rest: the
+        // boat's waterline, plus however far the swell departs from it here.
+        const surfaceY = waterline + (this.waveAt(bladeX, elapsed) - lift);
 
-        this.spawnSplash(
-          centreX + tipX * Math.cos(tilt) - bladeY * Math.sin(tilt),
-          centreY + tipX * Math.sin(tilt) + bladeY * Math.cos(tilt)
-        );
+        this.spawnSplash(bladeX, surfaceY);
       }
 
       paddle.lastPhase = phase;

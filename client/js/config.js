@@ -216,6 +216,30 @@ export const EXTRACT = {
      */
     writingHaloRatio: 0.006,
   },
+
+  /**
+   * Areas the visitor coloured in.
+   *
+   * Crayon and felt-tip do not cover paper evenly. Photographed, a coloured-in
+   * hull is not a block of colour but colour with the paper showing through it
+   * everywhere - and every one of those specks used to come out as bare boat,
+   * so a carefully filled-in boat arrived on the wall looking moth-eaten.
+   *
+   * The colour is found first, then closed up: the gaps between the strokes are
+   * treated as part of what was coloured, and take that area's own colour. What
+   * the visitor meant by colouring it in is that the whole area is that colour.
+   */
+  paint: {
+    // How wide a gap in the colour counts as the visitor's hand rather than
+    // their intention, as a fraction of the page's shorter side. Wider than the
+    // paper showing through a crayon stroke, narrower than a deliberate gap
+    // between two differently coloured areas.
+    closeRatio: 0.004,
+
+    // Below this share of the page, a patch of colour is a stray mark rather
+    // than an area that was coloured in, and is left exactly as it is.
+    minAreaRatio: 0.0004,
+  },
 };
 
 export const DISPLAY = {
