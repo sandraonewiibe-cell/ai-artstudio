@@ -56,7 +56,6 @@ export class Stage {
     this.background = background;
 
     this.boat = null;
-    this.hull = null;
     this.paddles = [];
     this.splashes = [];
     this.text = null;
@@ -97,26 +96,39 @@ export class Stage {
     const image = await loadImage(job.imageUrl);
 
     this.boat = image;
-    this.hull = null;
+    this.sketch = null;
     this.paddles = [];
     this.splashes = [];
 
     // If the drawing had oars in it, they arrive as separate layers and get
     // rowed individually. Any failure here falls back to the flat image.
+    //
+    // What goes on screen is the whole drawing, not a piece of it: the same
+    // scan, at the same size, with only the oars' own pixels painted out in
+    // the colours that surrounded them so the moving copies can stand in their
+    // place. Nothing is cut, nothing is split, and no fragment is ever shown on
+    // its own - the extraction is a means of finding the oars, and stays out of
+    // sight. If either half fails to load, both are dropped and the untouched
+    // scan is shown with no rowing, which is the one honest fallback.
     if (job.layers && job.layers.paddles && job.layers.paddles.length) {
       try {
-        this.hull = await loadImage(job.layers.hull);
-        this.paddles = await Promise.all(
-          job.layers.paddles.map(async (paddle) => ({
-            ...paddle,
-            image: await loadImage(paddle.url),
-            lastPhase: 0,
-          }))
-        );
+        const [sketch, paddles] = await Promise.all([
+          loadImage(job.layers.hull),
+          Promise.all(
+            job.layers.paddles.map(async (paddle) => ({
+              ...paddle,
+              image: await loadImage(paddle.url),
+              lastPhase: 0,
+            }))
+          ),
+        ]);
+
+        this.sketch = sketch;
+        this.paddles = paddles;
         console.log(`[stage] rowing ${this.paddles.length} oar(s)`);
       } catch (err) {
         console.warn('[stage] oar layers unusable, showing the flat boat:', err.message);
-        this.hull = null;
+        this.sketch = null;
         this.paddles = [];
       }
     }
@@ -139,10 +151,21 @@ export class Stage {
     this.lastFrameAt = this.startedAt;
   }
 
+  /**
+   * The one image the drawing is rendered from, wherever it is drawn.
+   *
+   * The oars-painted-out version when there is one, the raw scan otherwise -
+   * both are the full drawing at the same size, so everything downstream can
+   * treat this as simply "the sketch" and no caller has to know which it got.
+   */
+  get sketchImage() {
+    return this.sketch || this.boat;
+  }
+
   /** Back to background only. */
   clear() {
     this.boat = null;
-    this.hull = null;
+    this.sketch = null;
     this.paddles = [];
     this.splashes = [];
     this.text = null;
@@ -236,7 +259,7 @@ export class Stage {
       // with the flat hull and not with a rotated model. In 3D they are part of
       // the mesh instead - visible, but not rowing.
       if (this.paddles.length) {
-        this.drawPaddles(centreX, centreY, boatW, boatH, tilt, elapsed);
+        this.drawPaddles(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
       }
     }
 
@@ -252,8 +275,13 @@ export class Stage {
    * Oars are rigid - they swing rather than bend - so they are drawn inside
    * the hull's transform but not through its slicing. A small lag down the
    * line stops them moving as one block, which is what real rowing looks like.
+   *
+   * Each oar does take the one displacement its own slice of the hull has, at
+   * the point where it is held. Without that it swings about a pivot that is
+   * standing still while the plank under it rides the swell, and the oar reads
+   * as a loose piece floating beside the boat rather than as part of it.
    */
-  drawPaddles(centreX, centreY, boatW, boatH, tilt, elapsed) {
+  drawPaddles(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
     const { ctx } = this;
     const { periodMs, sweepDegrees, lagPerOar, catchPhase } = PADDLES.stroke;
     const sweep = (sweepDegrees * Math.PI) / 180;
@@ -270,7 +298,14 @@ export class Stage {
       const pivotX = -boatW / 2 + paddle.pivot.x * boatW;
       const pivotY = -boatH / 2 + paddle.pivot.y * boatH;
 
+      // The same residual drawHull() gives the slice at this x, so the oar
+      // rides with the piece of hull it is attached to. Identical arithmetic,
+      // sampled at one point instead of every slice.
+      const ride =
+        (this.waveAt(centreX + pivotX, elapsed) - (lift + slope * pivotX)) * WAVES.flex;
+
       ctx.save();
+      ctx.translate(0, ride);
       ctx.translate(pivotX, pivotY);
       ctx.rotate(angle);
       ctx.translate(-pivotX, -pivotY);
@@ -289,9 +324,13 @@ export class Stage {
         const tipY = -boatH / 2 + paddle.tip.y * boatH;
         const swung = rotateAbout(tipX, tipY, pivotX, pivotY, angle);
 
+        // `ride` carried through so the droplets still start at the blade.
+        // Nothing about the splash itself changes.
+        const bladeY = swung.y + ride;
+
         this.spawnSplash(
-          centreX + swung.x * Math.cos(tilt) - swung.y * Math.sin(tilt),
-          centreY + swung.x * Math.sin(tilt) + swung.y * Math.cos(tilt)
+          centreX + swung.x * Math.cos(tilt) - bladeY * Math.sin(tilt),
+          centreY + swung.x * Math.sin(tilt) + bladeY * Math.cos(tilt)
         );
       }
 
@@ -407,9 +446,9 @@ export class Stage {
   drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
     const { ctx } = this;
 
-    // With oars split out, the hull layer is drawn on its own and they are
-    // added on top; otherwise the whole drawing is the hull.
-    const image = this.hull || this.boat;
+    // The whole drawing, as one image. The slicing below bends it; it never
+    // removes any of it, so no part of the drawing can go missing here.
+    const image = this.sketchImage;
 
     const slices = WAVES.slices;
     const sliceSrc = image.width / slices;
@@ -451,8 +490,13 @@ export class Stage {
     const { ctx } = this;
     const { opacity, squash, wobble } = WAVES.reflection;
 
+    // The same image the hull is drawn from. Mirroring the raw scan instead
+    // would put a second, motionless pair of oars in the water underneath the
+    // rowing ones.
+    const image = this.sketchImage;
+
     const slices = WAVES.slices;
-    const sliceSrc = this.boat.width / slices;
+    const sliceSrc = image.width / slices;
     const sliceDst = boatW / slices;
     const height = boatH * squash;
 
@@ -471,11 +515,11 @@ export class Stage {
       const shimmer = this.waveAt(worldX * 1.6, elapsed * 1.4) * wobble;
 
       ctx.drawImage(
-        this.boat,
+        image,
         i * sliceSrc,
         0,
         sliceSrc,
-        this.boat.height,
+        image.height,
         offset + shimmer * 0.08,
         shimmer * 0.15,
         sliceDst + 1,

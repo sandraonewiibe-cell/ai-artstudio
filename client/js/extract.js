@@ -129,16 +129,25 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
   const { paddles, appendageMask, interiorMask } = detected;
   if (!paddles.length) return null;
 
-  // An oar hanging off the hull is cut away entirely. One drawn *across* the
-  // hull cannot be: removing it would punch a bar-shaped hole through the
-  // boat. It stays in the hull layer but is painted over in the hull's own
-  // colour, and the moving copy is drawn on top.
-  const hullMask = new Uint8Array(fill.length);
-  for (let i = 0; i < fill.length; i += 1) {
-    if (fill[i] && !appendageMask[i]) hullMask[i] = 1;
-  }
+  // Cover, never cut.
+  //
+  // The layer the display shows keeps every pixel of the drawing - `fill` goes
+  // through whole, so the hull is never split and no part of it can go missing.
+  // What changes is only the oars' own pixels, painted out using the colours
+  // immediately around them so the animated copy can take their place.
+  //
+  // Around an oar drawn across the hull those colours are the hull, so it
+  // closes up in the boat's own shade rather than in a global average the
+  // handwriting has been mixed into. Around one hanging off the hull they are
+  // the paper behind it, so it fades out instead of leaving a boat-coloured
+  // stub floating beside the boat. One rule, correct both ways.
+  //
+  // Grown by a single pixel: the least that also takes the stroke's own
+  // antialiased edge, which would otherwise survive as a faint outline of an
+  // oar that is no longer there.
+  const cover = grow(union(appendageMask, interiorMask), width, height);
 
-  const hull = renderLayer({ ...base, fill: hullMask, recolour: interiorMask, rect });
+  const hull = renderLayer({ ...base, fill, cover, rect });
   if (!hull) return null;
 
   const cropW = rect.x1 - rect.x0 + 1;
@@ -491,9 +500,13 @@ function unionBounds(components) {
  * Strokes and everything they enclose are fully opaque, so no blank gaps are
  * left inside the drawing. Only the fringe immediately outside the shape uses
  * a soft alpha, which keeps pencil edges from looking cut out.
+ *
+ * `cover` marks pixels to be painted out rather than drawn - the oars, once
+ * they are going to be animated on top. Those are left blank on this pass and
+ * filled in afterwards from whatever surrounds them.
  */
 function renderLayer({
-  page, luma, strokes, fill, width, height, reference, meanInk, rect, recolour,
+  page, luma, strokes, fill, width, height, reference, meanInk, rect, cover,
 }) {
   const { x0, y0, x1, y1 } = rect;
 
@@ -507,6 +520,9 @@ function renderLayer({
   const softness = EXTRACT.softness;
   const { chromaThreshold, washMargin } = EXTRACT.fill;
 
+  // Covered pixels, in the cropped frame, waiting to be painted out.
+  const pending = cover ? new Uint8Array(outW * outH) : null;
+
   let inkPixels = 0;
 
   for (let y = 0; y < outH; y += 1) {
@@ -516,6 +532,13 @@ function renderLayer({
       const si = sy * width + sx;
       const di = (y * outW + x) * 4;
 
+      // Held back for the fill below, whether it is part of the shape or the
+      // soft fringe around it - an oar's edge has to go with the oar.
+      if (pending && cover[si]) {
+        pending[y * outW + x] = 1;
+        continue;
+      }
+
       if (fill[si]) {
         const r = src[si * 4];
         const g = src[si * 4 + 1];
@@ -524,13 +547,9 @@ function renderLayer({
         // Strokes always keep their own colour. Enclosed pixels keep theirs
         // too if the visitor coloured them in - detected by chroma, since pale
         // crayon and white paper differ in colour far more than in brightness.
-        //
-        // `recolour` overrides both: those pixels are an oar being painted out
-        // of the hull, and must take the hull's colour however dark they are.
         const chroma = Math.max(r, g, b) - Math.min(r, g, b);
         const coloured =
-          !(recolour && recolour[si]) &&
-          (strokes[si] || chroma > chromaThreshold || luma[si] < reference[si] - washMargin);
+          strokes[si] || chroma > chromaThreshold || luma[si] < reference[si] - washMargin;
 
         dst[di] = coloured ? r : meanInk.r;
         dst[di + 1] = coloured ? g : meanInk.g;
@@ -559,6 +578,8 @@ function renderLayer({
     }
   }
 
+  if (pending) inkPixels += paintOut(dst, pending, outW, outH);
+
   const canvas = createCanvas(outW, outH);
   context2d(canvas).putImageData(out, 0, 0);
 
@@ -567,6 +588,126 @@ function renderLayer({
     bounds: { x: x0, y: y0, width: outW, height: outH },
     inkRatio: inkPixels / (outW * outH),
   };
+}
+
+/**
+ * Closes the gap left by an oar, using only what is immediately around it.
+ *
+ * The covered pixels are unknown; everything else is known. Each pass, an
+ * unknown pixel touching known ones takes their average and becomes known
+ * itself, so colour creeps inward from the rim until the whole stroke is
+ * filled. An oar is a thin thing, so this converges in a handful of passes.
+ *
+ * The average is weighted by alpha, which is what makes one rule serve both
+ * cases. Inside the hull every neighbour is opaque, so the gap closes at full
+ * strength in the hull's own colour. Out over the paper every neighbour is
+ * transparent, so it closes to nothing and the oar simply is not there. On the
+ * boundary between the two it lands in proportion, and the join stays soft.
+ *
+ * A plain mean would fail the second case: transparent pixels carry no colour,
+ * only zeroes, and averaging those in would smear black where the paper is.
+ *
+ * @returns {number} how many covered pixels ended up opaque enough to see
+ */
+function paintOut(dst, pending, w, h) {
+  let remaining = 0;
+  for (let i = 0; i < pending.length; i += 1) if (pending[i]) remaining += 1;
+  if (!remaining) return 0;
+
+  const next = new Uint8Array(pending.length);
+  let visible = 0;
+
+  while (remaining > 0) {
+    // Jacobi, not Gauss-Seidel: a pixel settled earlier in this same pass is
+    // not read by its neighbours until the next one. Sweeping in place would
+    // drag colour across the stroke in whatever direction the loop happens to
+    // run, and leave a visible streak along it.
+    next.set(pending);
+    let settled = 0;
+
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const p = y * w + x;
+        if (!pending[p]) continue;
+
+        let n = 0;
+        let sumA = 0;
+        let sumR = 0;
+        let sumG = 0;
+        let sumB = 0;
+
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+
+            const q = ny * w + nx;
+            if (pending[q]) continue; // still unknown this pass
+
+            const a = dst[q * 4 + 3];
+            n += 1;
+            sumA += a;
+            sumR += dst[q * 4] * a;
+            sumG += dst[q * 4 + 1] * a;
+            sumB += dst[q * 4 + 2] * a;
+          }
+        }
+
+        if (!n) continue; // nothing known next door yet; wait a pass
+
+        const alpha = Math.round(sumA / n);
+        dst[p * 4] = sumA ? Math.round(sumR / sumA) : 0;
+        dst[p * 4 + 1] = sumA ? Math.round(sumG / sumA) : 0;
+        dst[p * 4 + 2] = sumA ? Math.round(sumB / sumA) : 0;
+        dst[p * 4 + 3] = alpha;
+
+        if (alpha > 2) visible += 1;
+
+        next[p] = 0;
+        settled += 1;
+      }
+    }
+
+    // Nothing settled means the rest is unreachable - it can only happen if a
+    // covered region touches nothing known at all. Leaving it transparent is
+    // the safe end: a gap in the water, never a hole in the boat.
+    if (!settled) break;
+
+    pending.set(next);
+    remaining -= settled;
+  }
+
+  return visible;
+}
+
+/** A mask grown by one pixel in every direction. */
+function grow(mask, width, height) {
+  const out = mask.slice();
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!mask[y * width + x]) continue;
+
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          out[ny * width + nx] = 1;
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+/** Either mask. */
+function union(a, b) {
+  const out = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i += 1) if (a[i] || b[i]) out[i] = 1;
+  return out;
 }
 
 /** True if any of the 8 neighbours is part of the filled shape. */
