@@ -6,11 +6,45 @@ const storage = require('./storage');
 const pipeline = require('./pipeline');
 const events = require('./events');
 const recordings = require('./recordings');
+const ratelimit = require('./ratelimit');
 const { publicBase, candidates } = require('./network');
 
 const app = express();
 
-app.use(express.json({ limit: config.maxUploadSize }));
+// Behind a host's router the connection comes from the proxy, not the visitor.
+// Rate limiting needs to tell callers apart, so the forwarded address has to be
+// trusted - but only where a proxy is actually in front. See config.trustProxy.
+if (config.trustProxy) app.set('trust proxy', config.trustProxy);
+
+// Express advertises itself in a header on every response. Nothing needs to
+// know which server software this is, or that there is an Express version here
+// worth looking up.
+app.disable('x-powered-by');
+
+/**
+ * Body parsing and rate limiting, mounted per route rather than globally.
+ *
+ * Only two endpoints read a body, and both accept a large one. Parsing that
+ * generously on every path would let any URL - including ones with no handler -
+ * be used to push megabytes at the process.
+ *
+ * The limiter runs *before* the parser on each route, so a caller past their
+ * ceiling is turned away without the payload being read into memory first.
+ */
+const sessionBody = express.json({ limit: config.uploads.session });
+const recordingBody = express.json({ limit: config.uploads.recording });
+
+const sessionLimit = ratelimit.limit({
+  name: 'sessions',
+  max: config.rateLimit.sessions,
+  windowMs: config.rateLimit.windowMs,
+});
+
+const recordingLimit = ratelimit.limit({
+  name: 'recordings',
+  max: config.rateLimit.recordings,
+  windowMs: config.rateLimit.windowMs,
+});
 
 // --- pages ------------------------------------------------------------------
 // Three screens, three URLs:
@@ -42,9 +76,15 @@ app.get('/api/health', (req, res) => {
     ...pipeline.info,
     screens: events.clientCount(),
     publicBase: publicBase(config.port),
+
     // Every address a phone might reach, so a timeout can be diagnosed without
     // going to the machine.
-    networks: candidates(),
+    //
+    // Left out of a deployment: there the addresses describe the inside of the
+    // host's network rather than anything a visitor could use, and health is a
+    // public endpoint, so it would be telling every caller about the host for
+    // no one's benefit.
+    ...(config.isProduction ? {} : { networks: candidates() }),
   });
 });
 
@@ -54,7 +94,7 @@ app.get('/api/events', (req, res) => {
 });
 
 /** Start a session from a capture. Returns a job id to poll. */
-app.post('/api/sessions', (req, res) => {
+app.post('/api/sessions', sessionLimit, sessionBody, (req, res) => {
   try {
     if (!req.body || !req.body.paper) {
       return res.status(400).json({ error: 'Missing "paper" image.' });
@@ -81,7 +121,7 @@ app.get('/api/sessions/:id', (req, res) => {
 });
 
 /** The display screen posts its recording here when playback finishes. */
-app.post('/api/recordings', (req, res) => {
+app.post('/api/recordings', recordingLimit, recordingBody, (req, res) => {
   try {
     if (!req.body || !req.body.data) {
       return res.status(400).json({ error: 'Missing recording data.' });
