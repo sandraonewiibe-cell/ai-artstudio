@@ -67,18 +67,24 @@ export function extractDrawing(pageCanvas) {
   const selected = new Set(kept.map((c) => c.label));
   const strokes = buildStrokeMask(labels, selected, width, height);
 
+  // Anything the visitor drew *on* the boat rather than as part of it - a name
+  // across the hull, a heart, a smiley. It is separated first, because both of
+  // the decisions below would otherwise get it wrong.
+  const writingLabels = selectWritingLabels(kept);
+
   // Which components are big enough to count as the boat. Only areas these
   // help enclose get filled, so every compartment inside the hull fills while
   // the counters of O, A, B and e stay open.
-  const hullLabels = selectHullLabels(kept);
+  const hullLabels = selectHullLabels(kept, writingLabels);
   const walls = buildStrokeMask(labels, hullLabels, width, height);
 
   const hullBounds = unionBounds(kept.filter((c) => hullLabels.has(c.label)));
 
-  const { fill, filled } = fillEnclosedAreas(
+  const { fill, filled, preserve } = fillEnclosedAreas(
     strokes,
     labels,
     hullLabels,
+    writingLabels,
     hullBounds,
     width,
     height
@@ -92,7 +98,7 @@ export function extractDrawing(pageCanvas) {
 
   const base = { page, luma, strokes, width, height, reference, meanInk };
 
-  const rendered = renderLayer({ ...base, fill, rect });
+  const rendered = renderLayer({ ...base, fill, preserve, rect });
   if (!rendered) return null;
 
   return {
@@ -109,12 +115,19 @@ export function extractDrawing(pageCanvas) {
 }
 
 /**
- * Separates the oars from the hull so each can be rowed on the display.
+ * Measures the oars so each can be rowed on the display.
  *
- * Returns null when the drawing has no oars in it, and the display then shows
- * the single flat image exactly as before.
+ * Nothing here changes what is shown. The drawing goes to the wall exactly as
+ * it was scanned, in one piece; this only works out where each oar is, what
+ * shape it has, and which point it turns about, so a moving copy can be laid
+ * over it. The masks and the labelling live for the length of this call and
+ * never reach a screen.
  *
- * @returns {{hull: HTMLCanvasElement, paddles: object[]}|null}
+ * Returns null when the drawing has no oars in it, or when the read of them is
+ * not trustworthy - in either case the display shows the untouched drawing and
+ * nothing rows.
+ *
+ * @returns {{paddles: object[]}|null}
  */
 function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
   const { width, height, strokes } = base;
@@ -129,27 +142,9 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
   const { paddles, appendageMask, interiorMask } = detected;
   if (!paddles.length) return null;
 
-  // Cover, never cut.
-  //
-  // The layer the display shows keeps every pixel of the drawing - `fill` goes
-  // through whole, so the hull is never split and no part of it can go missing.
-  // What changes is only the oars' own pixels, painted out using the colours
-  // immediately around them so the animated copy can take their place.
-  //
-  // Around an oar drawn across the hull those colours are the hull, so it
-  // closes up in the boat's own shade rather than in a global average the
-  // handwriting has been mixed into. Around one hanging off the hull they are
-  // the paper behind it, so it fades out instead of leaving a boat-coloured
-  // stub floating beside the boat. One rule, correct both ways.
-  //
-  // Grown by a single pixel: the least that also takes the stroke's own
-  // antialiased edge, which would otherwise survive as a faint outline of an
-  // oar that is no longer there.
-  const cover = grow(union(appendageMask, interiorMask), width, height);
-
-  const hull = renderLayer({ ...base, fill, cover, rect });
-  if (!hull) return null;
-
+  // No hull layer is produced. There is nothing for one to be: the drawing is
+  // shown whole and unaltered, so a second copy of it - cut, covered or plain -
+  // would only be another thing that could end up on screen by mistake.
   const cropW = rect.x1 - rect.x0 + 1;
   const cropH = rect.y1 - rect.y0 + 1;
 
@@ -186,12 +181,19 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
         pivot: relative(paddle.pivot),
         tip: relative(paddle.tip),
       };
-    })
-    .filter(Boolean);
+    });
 
-  if (!rendered.length) return null;
+  // All of them or none.
+  //
+  // An oar that could not be measured is a sign the read of this drawing is
+  // doubtful, and a doubtful read is exactly when animating is worst: a region
+  // gets separated that was never an oar. Dropping just the bad one used to
+  // leave the rest rowing on that same doubtful read. Standing the whole thing
+  // down instead costs an animation and keeps the drawing as the visitor made
+  // it, which is the cheaper mistake by far.
+  if (!rendered.length || rendered.some((paddle) => !paddle)) return null;
 
-  return { hull: hull.canvas, paddles: rendered };
+  return { paddles: rendered };
 }
 
 /** Crop box for a set of bounds, with breathing room, clamped to the page. */
@@ -286,13 +288,60 @@ function largestOf(components) {
   return components.reduce((a, b) => (b.area > a.area ? b : a));
 }
 
-/** The components big enough to count as the boat rather than an annotation. */
-function selectHullLabels(components) {
+/**
+ * What the visitor wrote or drew *on* the boat, as opposed to the boat itself.
+ *
+ * A mark that sits inside the boat's own extent without joining it is on the
+ * boat rather than part of it - a name across the hull, a heart, a smiley
+ * face. Anything drawn as part of the boat is continuous with it and comes
+ * back as the same component; anything alongside it, like the name written
+ * underneath, falls outside its box.
+ *
+ * Size is deliberately not the test. It was, in effect, and that is what went
+ * wrong: a big letter or the ring of a smiley clears the bar that decides what
+ * counts as the boat, and from there its middle gets filled in solid like a
+ * compartment of the hull. A letter is a letter at any size.
+ */
+function selectWritingLabels(components) {
+  if (components.length < 2) return new Set();
+
+  const boat = largestOf(components);
+  const hull = boxOf(boat);
+
+  return new Set(
+    components
+      .filter((c) => c.label !== boat.label)
+      .filter((c) => within(c, hull))
+      .map((c) => c.label)
+  );
+}
+
+/** True if a component sits entirely within a box. */
+function within(component, box) {
+  return (
+    component.minX >= box.minX &&
+    component.maxX <= box.maxX &&
+    component.minY >= box.minY &&
+    component.maxY <= box.maxY
+  );
+}
+
+/**
+ * The components big enough to count as the boat rather than an annotation.
+ *
+ * Writing is excluded whatever its size: what this set decides is which marks
+ * may enclose an area that then gets filled solid, and the inside of an O is
+ * not a compartment of the boat.
+ */
+function selectHullLabels(components, writingLabels = new Set()) {
   const largest = largestOf(components);
   const threshold = largest.area * EXTRACT.fill.hullShareRatio;
 
   return new Set(
-    components.filter((c) => c.area >= threshold).map((c) => c.label)
+    components
+      .filter((c) => !writingLabels.has(c.label))
+      .filter((c) => c.area >= threshold)
+      .map((c) => c.label)
   );
 }
 
@@ -310,13 +359,21 @@ function selectHullLabels(components) {
  * bounded only by the letter itself. Judging the *hole* by its size cannot
  * tell those apart; judging its boundary can.
  *
+ * Writing on the boat is handled apart from both. The area inside an O is
+ * enclosed, and it is inside the boat, so leaving it out would punch a
+ * see-through hole in the hull - but filling it with the boat's colour like a
+ * compartment would blot the letter out. It is filled, so there is no hole,
+ * and marked to be *preserved*: rendered from the photograph instead of
+ * painted, so what shows through the letter is the paper that was behind it.
+ *
  * @param {Uint8Array} strokes every kept component, boat and text alike
  * @param {Int32Array} labels component label per pixel
  * @param {Set<number>} hullLabels components counting as the boat
+ * @param {Set<number>} writingLabels components written on the boat
  * @param {{minX:number,maxX:number,minY:number,maxY:number}} bounds hull extent
- * @returns {{fill: Uint8Array, filled: number}} fill = strokes plus enclosed areas
+ * @returns {{fill: Uint8Array, filled: number, preserve: Uint8Array}}
  */
-function fillEnclosedAreas(strokes, labels, hullLabels, bounds, width, height) {
+function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, width, height) {
   const outside = new Uint8Array(width * height);
   const stack = new Int32Array(width * height);
   let top = 0;
@@ -356,7 +413,7 @@ function fillEnclosedAreas(strokes, labels, hullLabels, bounds, width, height) {
 
   if (reached < outside.length * 0.05) {
     console.warn('[extract] page border is enclosed by ink; skipping the fill');
-    return { fill: strokes.slice(), filled: 0 };
+    return { fill: strokes.slice(), filled: 0, preserve: new Uint8Array(width * height) };
   }
 
   // Candidate holes: unreachable, not a stroke, and inside the hull's extent.
@@ -370,29 +427,58 @@ function fillEnclosedAreas(strokes, labels, hullLabels, bounds, width, height) {
   }
 
   const { labels: holeLabels } = labelComponents(enclosed, width, height);
+
   const fillable = holesTouchingHull(enclosed, holeLabels, strokes, labels, hullLabels, width, height);
+  const inWriting = holesTouchingHull(enclosed, holeLabels, strokes, labels, writingLabels, width, height);
 
   const fill = new Uint8Array(width * height);
+  const preserve = new Uint8Array(width * height);
   let filled = 0;
 
   for (let i = 0; i < fill.length; i += 1) {
+    // A hole belongs to the letter that made it unless the boat is also one of
+    // its walls - writing that touches the hull is not a counter, it is a
+    // compartment, and it fills like one.
+    const counter = enclosed[i] && inWriting.has(holeLabels[i]) && !fillable.has(holeLabels[i]);
+
     if (strokes[i]) {
       fill[i] = 1;
-    } else if (enclosed[i] && fillable.has(holeLabels[i])) {
+    } else if (enclosed[i] && (fillable.has(holeLabels[i]) || counter)) {
       fill[i] = 1;
       filled += 1;
     }
+
+    if (counter) preserve[i] = 1;
   }
 
-  return { fill, filled };
+  // The writing itself, and a little of the paper around it.
+  //
+  // The ink is kept verbatim by renderLayer already; what it needed was
+  // somewhere to be read against. Without this margin a letter is drawn in the
+  // visitor's own pencil directly onto a hull filled with the average of that
+  // same pencil, and disappears into it. The margin is what "the paper behind
+  // it" means - the boat closes back up a few pixels out.
+  const halo = Math.max(
+    2,
+    Math.round(Math.min(width, height) * EXTRACT.fill.writingHaloRatio)
+  );
+  const writingMask = buildStrokeMask(labels, writingLabels, width, height);
+  const around = growBy(writingMask, width, height, halo);
+
+  for (let i = 0; i < preserve.length; i += 1) if (around[i]) preserve[i] = 1;
+
+  return { fill, filled, preserve };
 }
 
 /**
- * Which enclosed areas have a hull-sized component as one of their walls.
+ * Which enclosed areas have one of the given components as a wall.
  *
  * "One of" rather than "most of" on purpose: a compartment between two thwarts
  * is bounded partly by the hull and partly by the thin seat strokes, and
  * requiring a majority would leave those gaps blank.
+ *
+ * Asked twice, with two different sets: once for the boat, to find the
+ * compartments, and once for the writing, to find the insides of letters.
  */
 function holesTouchingHull(enclosed, holeLabels, strokes, labels, hullLabels, width, height) {
   const fillable = new Set();
@@ -501,12 +587,15 @@ function unionBounds(components) {
  * left inside the drawing. Only the fringe immediately outside the shape uses
  * a soft alpha, which keeps pencil edges from looking cut out.
  *
- * `cover` marks pixels to be painted out rather than drawn - the oars, once
- * they are going to be animated on top. Those are left blank on this pass and
- * filled in afterwards from whatever surrounds them.
+ * Nothing is ever subtracted or painted over here. A layer is only ever a
+ * selection of pixels drawn as they were photographed.
+ *
+ * `preserve` marks the pixels that must come from the photograph even where
+ * they would otherwise be painted with the boat's colour - the writing on the
+ * hull, and the paper immediately around and inside it.
  */
 function renderLayer({
-  page, luma, strokes, fill, width, height, reference, meanInk, rect, cover,
+  page, luma, strokes, fill, width, height, reference, meanInk, rect, preserve,
 }) {
   const { x0, y0, x1, y1 } = rect;
 
@@ -520,9 +609,6 @@ function renderLayer({
   const softness = EXTRACT.softness;
   const { chromaThreshold, washMargin } = EXTRACT.fill;
 
-  // Covered pixels, in the cropped frame, waiting to be painted out.
-  const pending = cover ? new Uint8Array(outW * outH) : null;
-
   let inkPixels = 0;
 
   for (let y = 0; y < outH; y += 1) {
@@ -532,13 +618,6 @@ function renderLayer({
       const si = sy * width + sx;
       const di = (y * outW + x) * 4;
 
-      // Held back for the fill below, whether it is part of the shape or the
-      // soft fringe around it - an oar's edge has to go with the oar.
-      if (pending && cover[si]) {
-        pending[y * outW + x] = 1;
-        continue;
-      }
-
       if (fill[si]) {
         const r = src[si * 4];
         const g = src[si * 4 + 1];
@@ -547,9 +626,16 @@ function renderLayer({
         // Strokes always keep their own colour. Enclosed pixels keep theirs
         // too if the visitor coloured them in - detected by chroma, since pale
         // crayon and white paper differ in colour far more than in brightness.
+        //
+        // ...and so does anything marked to be preserved, blank or not. That
+        // is what makes writing on the boat come out as written: the letters
+        // in their own ink, on the paper they were written on.
         const chroma = Math.max(r, g, b) - Math.min(r, g, b);
         const coloured =
-          strokes[si] || chroma > chromaThreshold || luma[si] < reference[si] - washMargin;
+          (preserve && preserve[si]) ||
+          strokes[si] ||
+          chroma > chromaThreshold ||
+          luma[si] < reference[si] - washMargin;
 
         dst[di] = coloured ? r : meanInk.r;
         dst[di + 1] = coloured ? g : meanInk.g;
@@ -578,8 +664,6 @@ function renderLayer({
     }
   }
 
-  if (pending) inkPixels += paintOut(dst, pending, outW, outH);
-
   const canvas = createCanvas(outW, outH);
   context2d(canvas).putImageData(out, 0, 0);
 
@@ -591,122 +675,29 @@ function renderLayer({
 }
 
 /**
- * Closes the gap left by an oar, using only what is immediately around it.
+ * A mask grown outward by `radius`.
  *
- * The covered pixels are unknown; everything else is known. Each pass, an
- * unknown pixel touching known ones takes their average and becomes known
- * itself, so colour creeps inward from the rim until the whole stroke is
- * filled. An oar is a thin thing, so this converges in a handful of passes.
- *
- * The average is weighted by alpha, which is what makes one rule serve both
- * cases. Inside the hull every neighbour is opaque, so the gap closes at full
- * strength in the hull's own colour. Out over the paper every neighbour is
- * transparent, so it closes to nothing and the oar simply is not there. On the
- * boundary between the two it lands in proportion, and the join stays soft.
- *
- * A plain mean would fail the second case: transparent pixels carry no colour,
- * only zeroes, and averaging those in would smear black where the paper is.
- *
- * @returns {number} how many covered pixels ended up opaque enough to see
+ * Walked from the set pixels rather than swept over the page: writing is a
+ * small part of a drawing, and this runs while the visitor is standing there.
  */
-function paintOut(dst, pending, w, h) {
-  let remaining = 0;
-  for (let i = 0; i < pending.length; i += 1) if (pending[i]) remaining += 1;
-  if (!remaining) return 0;
-
-  const next = new Uint8Array(pending.length);
-  let visible = 0;
-
-  while (remaining > 0) {
-    // Jacobi, not Gauss-Seidel: a pixel settled earlier in this same pass is
-    // not read by its neighbours until the next one. Sweeping in place would
-    // drag colour across the stroke in whatever direction the loop happens to
-    // run, and leave a visible streak along it.
-    next.set(pending);
-    let settled = 0;
-
-    for (let y = 0; y < h; y += 1) {
-      for (let x = 0; x < w; x += 1) {
-        const p = y * w + x;
-        if (!pending[p]) continue;
-
-        let n = 0;
-        let sumA = 0;
-        let sumR = 0;
-        let sumG = 0;
-        let sumB = 0;
-
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-
-            const q = ny * w + nx;
-            if (pending[q]) continue; // still unknown this pass
-
-            const a = dst[q * 4 + 3];
-            n += 1;
-            sumA += a;
-            sumR += dst[q * 4] * a;
-            sumG += dst[q * 4 + 1] * a;
-            sumB += dst[q * 4 + 2] * a;
-          }
-        }
-
-        if (!n) continue; // nothing known next door yet; wait a pass
-
-        const alpha = Math.round(sumA / n);
-        dst[p * 4] = sumA ? Math.round(sumR / sumA) : 0;
-        dst[p * 4 + 1] = sumA ? Math.round(sumG / sumA) : 0;
-        dst[p * 4 + 2] = sumA ? Math.round(sumB / sumA) : 0;
-        dst[p * 4 + 3] = alpha;
-
-        if (alpha > 2) visible += 1;
-
-        next[p] = 0;
-        settled += 1;
-      }
-    }
-
-    // Nothing settled means the rest is unreachable - it can only happen if a
-    // covered region touches nothing known at all. Leaving it transparent is
-    // the safe end: a gap in the water, never a hole in the boat.
-    if (!settled) break;
-
-    pending.set(next);
-    remaining -= settled;
-  }
-
-  return visible;
-}
-
-/** A mask grown by one pixel in every direction. */
-function grow(mask, width, height) {
+function growBy(mask, width, height, radius) {
   const out = mask.slice();
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       if (!mask[y * width + x]) continue;
 
-      for (let dy = -1; dy <= 1; dy += 1) {
-        for (let dx = -1; dx <= 1; dx += 1) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-          out[ny * width + nx] = 1;
-        }
+      const y0 = Math.max(0, y - radius);
+      const y1 = Math.min(height - 1, y + radius);
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width - 1, x + radius);
+
+      for (let ny = y0; ny <= y1; ny += 1) {
+        for (let nx = x0; nx <= x1; nx += 1) out[ny * width + nx] = 1;
       }
     }
   }
 
-  return out;
-}
-
-/** Either mask. */
-function union(a, b) {
-  const out = new Uint8Array(a.length);
-  for (let i = 0; i < a.length; i += 1) if (a[i] || b[i]) out[i] = 1;
   return out;
 }
 

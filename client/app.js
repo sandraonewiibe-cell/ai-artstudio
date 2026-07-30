@@ -196,11 +196,14 @@ async function runSession(quad, insetRatio) {
       drawing: drawing ? drawing.canvas.toDataURL('image/png') : null,
     };
 
-    // Oars, if the drawing had any, travel as separate layers so the display
+    // Oars, if the drawing had any, travel as separate images so the display
     // can row them. Absent for a drawing without oars.
+    //
+    // The oars only. The drawing itself is already in `drawing` above and goes
+    // up once, whole; nothing here is a second version of it. Whatever the
+    // extraction built to find the oars stayed in the browser and is gone.
     if (drawing && drawing.layers) {
       payload.layers = {
-        hull: drawing.layers.hull.toDataURL('image/png'),
         paddles: drawing.layers.paddles.map((paddle) => ({
           data: paddle.canvas.toDataURL('image/png'),
           rect: paddle.rect,

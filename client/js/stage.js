@@ -96,39 +96,30 @@ export class Stage {
     const image = await loadImage(job.imageUrl);
 
     this.boat = image;
-    this.sketch = null;
     this.paddles = [];
     this.splashes = [];
 
-    // If the drawing had oars in it, they arrive as separate layers and get
-    // rowed individually. Any failure here falls back to the flat image.
+    // The drawing on screen is `this.boat` and only ever `this.boat` - the scan
+    // as it arrived, in one piece, with nothing taken out of it or laid over
+    // the top of it but the oars themselves.
     //
-    // What goes on screen is the whole drawing, not a piece of it: the same
-    // scan, at the same size, with only the oars' own pixels painted out in
-    // the colours that surrounded them so the moving copies can stand in their
-    // place. Nothing is cut, nothing is split, and no fragment is ever shown on
-    // its own - the extraction is a means of finding the oars, and stays out of
-    // sight. If either half fails to load, both are dropped and the untouched
-    // scan is shown with no rowing, which is the one honest fallback.
+    // The oar images are the one thing loaded besides it. Each is a copy of an
+    // oar the visitor drew, and gets rowed about its own pivot on its own
+    // phase; the drawing underneath keeps every pixel it had. If any of them
+    // fails to load, all of them are dropped and nothing rows - a still drawing
+    // is right, half a set of moving oars is not.
     if (job.layers && job.layers.paddles && job.layers.paddles.length) {
       try {
-        const [sketch, paddles] = await Promise.all([
-          loadImage(job.layers.hull),
-          Promise.all(
-            job.layers.paddles.map(async (paddle) => ({
-              ...paddle,
-              image: await loadImage(paddle.url),
-              lastPhase: 0,
-            }))
-          ),
-        ]);
-
-        this.sketch = sketch;
-        this.paddles = paddles;
+        this.paddles = await Promise.all(
+          job.layers.paddles.map(async (paddle) => ({
+            ...paddle,
+            image: await loadImage(paddle.url),
+            lastPhase: 0,
+          }))
+        );
         console.log(`[stage] rowing ${this.paddles.length} oar(s)`);
       } catch (err) {
         console.warn('[stage] oar layers unusable, showing the flat boat:', err.message);
-        this.sketch = null;
         this.paddles = [];
       }
     }
@@ -151,21 +142,9 @@ export class Stage {
     this.lastFrameAt = this.startedAt;
   }
 
-  /**
-   * The one image the drawing is rendered from, wherever it is drawn.
-   *
-   * The oars-painted-out version when there is one, the raw scan otherwise -
-   * both are the full drawing at the same size, so everything downstream can
-   * treat this as simply "the sketch" and no caller has to know which it got.
-   */
-  get sketchImage() {
-    return this.sketch || this.boat;
-  }
-
   /** Back to background only. */
   clear() {
     this.boat = null;
-    this.sketch = null;
     this.paddles = [];
     this.splashes = [];
     this.text = null;
@@ -446,9 +425,9 @@ export class Stage {
   drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
     const { ctx } = this;
 
-    // The whole drawing, as one image. The slicing below bends it; it never
-    // removes any of it, so no part of the drawing can go missing here.
-    const image = this.sketchImage;
+    // The scan itself, whole. The slicing below bends it; it never removes any
+    // of it, so no part of the drawing can go missing here.
+    const image = this.boat;
 
     const slices = WAVES.slices;
     const sliceSrc = image.width / slices;
@@ -490,10 +469,9 @@ export class Stage {
     const { ctx } = this;
     const { opacity, squash, wobble } = WAVES.reflection;
 
-    // The same image the hull is drawn from. Mirroring the raw scan instead
-    // would put a second, motionless pair of oars in the water underneath the
-    // rowing ones.
-    const image = this.sketchImage;
+    // The same scan the hull is drawn from, so the reflection is a mirror of
+    // what is actually on the water and not of some other version of it.
+    const image = this.boat;
 
     const slices = WAVES.slices;
     const sliceSrc = image.width / slices;

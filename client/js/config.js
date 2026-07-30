@@ -199,6 +199,22 @@ export const EXTRACT = {
     // either blanks out the boat or blacks out the name. Judging the boundary
     // separates them cleanly.
     hullShareRatio: 0.15,
+
+    /**
+     * Paper kept around writing drawn on the boat, as a fraction of the page's
+     * shorter side.
+     *
+     * A name or a smiley on the hull is written in the same pencil the boat is
+     * drawn in, and the hull is filled with the average of that pencil - so
+     * without a margin the writing is the exact colour of the surface under it
+     * and cannot be read at all. This is how much of the original paper stays
+     * around each mark for it to be read against.
+     *
+     * Small on purpose: enough to separate the letters from the fill, not so
+     * much that the boat looks like it has a hole cut in it. Raise it if
+     * writing is still hard to read on the wall; lower it if the patches show.
+     */
+    writingHaloRatio: 0.006,
   },
 };
 

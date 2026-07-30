@@ -113,11 +113,16 @@ async function run(job, paperBuffer, drawingBuffer, layers) {
   job.status = 'done';
 }
 
-/** Writes the hull and oar images, returning the URLs the display will load. */
+/**
+ * Writes the oar images, returning the URLs the display will load.
+ *
+ * The oars and nothing else. There is no second copy of the drawing here: the
+ * display shows the generated image whole and lays these over it, so a hull
+ * layer would be an unused duplicate on disk and one more thing that could
+ * reach a screen by accident.
+ */
 function saveLayers(prefix, layers) {
   try {
-    const hull = storage.save('images', `${prefix}-hull.png`, layers.hull);
-
     const paddles = layers.paddles.map((paddle, index) => ({
       url: storage.save('images', `${prefix}-oar-${index}.png`, paddle.buffer).url,
       rect: paddle.rect,
@@ -125,7 +130,7 @@ function saveLayers(prefix, layers) {
       tip: paddle.tip,
     }));
 
-    return paddles.length ? { hull: hull.url, paddles } : null;
+    return paddles.length ? { paddles } : null;
   } catch (err) {
     // Losing the oars costs an animation, not the session.
     console.warn('[pipeline] could not store oar layers:', err.message);
@@ -133,12 +138,11 @@ function saveLayers(prefix, layers) {
   }
 }
 
-/** Decodes the oar layers posted by the scanner. */
+/** Decodes the oar images posted by the scanner. */
 function decodeLayers(layers) {
   if (!layers || !Array.isArray(layers.paddles) || !layers.paddles.length) return null;
 
   return {
-    hull: storage.decodeDataUrl(layers.hull),
     paddles: layers.paddles.map((paddle) => ({
       buffer: storage.decodeDataUrl(paddle.data),
       rect: paddle.rect,
