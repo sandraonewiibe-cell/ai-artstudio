@@ -484,7 +484,6 @@ body[data-scanning="off"] .corner {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.72);
   opacity: 0;
   transition: opacity 400ms ease;
 }
@@ -503,3 +502,24 @@ body[data-scanning="off"] .corner {
 .wall-ad[data-placement='bottom'] { bottom: 0; left: 0; right: 0; height: 22vh; }
 .wall-ad[data-placement='left'] { top: 0; bottom: 0; left: 0; width: 22vw; }
 .wall-ad[data-placement='right'] { top: 0; bottom: 0; right: 0; width: 22vw; }
+
+/* No panel behind an advertisement - it sits on the water like everything else
+   on this screen. Without one it would end on a hard straight line instead, so
+   the edge facing into the scene is faded out. The other three sit on the edge
+   of the screen, where there is nothing to blend with and nothing to do. */
+.wall-ad[data-placement='top'] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+}
+.wall-ad[data-placement='bottom'] {
+  -webkit-mask-image: linear-gradient(to top, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 62%, transparent 100%);
+}
+.wall-ad[data-placement='left'] {
+  -webkit-mask-image: linear-gradient(to right, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 62%, transparent 100%);
+}
+.wall-ad[data-placement='right'] {
+  -webkit-mask-image: linear-gradient(to left, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to left, #000 62%, transparent 100%);
+}
