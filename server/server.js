@@ -159,8 +159,23 @@ app.get('/api/qr', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error('[server] unhandled error:', err);
   if (res.headersSent) return next(err);
+
+  // A payload over the limit, or one that is not JSON at all, is the caller's
+  // mistake and has to be answered as such. Reporting it as 500 would both
+  // mislead the client and, under a flood, fill the log with stack traces for
+  // something the server handled correctly.
+  if (err.type === 'entity.too.large') {
+    console.warn(`[server] rejected oversized ${req.method} ${req.path} (limit ${err.limit})`);
+    return res.status(413).json({ error: 'Upload too large.' });
+  }
+
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    console.warn(`[server] rejected malformed body on ${req.method} ${req.path}`);
+    return res.status(400).json({ error: 'Malformed request body.' });
+  }
+
+  console.error('[server] unhandled error:', err);
   return res.status(500).json({ error: 'Internal error.' });
 });
 
