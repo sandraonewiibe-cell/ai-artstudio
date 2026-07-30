@@ -24,6 +24,9 @@ const recorder = new Recorder(canvas, { fps: 30 });
 // The organiser's logos and advertisements, in front of the canvas rather than
 // painted into it - so they are never in the clip the visitor takes home, and
 // the boat's own drawing code is untouched by any of it.
+//
+// The rotation runs on its own clock and pays no attention to what the wall is
+// doing, so advertisements keep their turn whether or not a boat is crossing.
 const overlay = createOverlay();
 
 /** One session at a time; a result arriving mid-playback waits its turn. */
@@ -40,7 +43,6 @@ const RECORD_MS = Math.min(DISPLAY.recordMs, DISPLAY.holdMs);
 
 async function play(job) {
   busy = true;
-  overlay.setBusy(true); // an advertisement must never cover a boat
 
   try {
     await stage.show(job);
@@ -65,7 +67,6 @@ async function play(job) {
     busy = false;
     const next = queue.shift();
     if (next) play(next);
-    else overlay.setBusy(false);
   }
 }
 

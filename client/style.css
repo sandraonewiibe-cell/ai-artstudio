@@ -488,6 +488,12 @@ body[data-scanning="off"] .corner {
   transition: opacity 400ms ease;
 }
 
+/* Without this the element is never actually hidden. `display: flex` above and
+   the browser's own `[hidden] { display: none }` have the same weight, and the
+   one here comes later, so it wins - leaving the frame composited over the wall
+   between advertisements with nothing but opacity keeping it out of sight. */
+.wall-ad[hidden] { display: none; }
+
 .wall-ad.is-visible { opacity: 1; }
 
 .wall-ad img,
