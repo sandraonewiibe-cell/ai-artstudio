@@ -16,18 +16,6 @@ const AD_FADE_MS = 400;
 /** How soon the first advertisement appears once the settings arrive. */
 const FIRST_SHOW_MS = 1500;
 
-/**
- * The shortest gap between one advertisement ending and the next beginning.
- *
- * The gap normally comes out of the frequency - an advertisement every 90
- * seconds that runs for 10 leaves 80 seconds of wall. This is the floor, for
- * when the two numbers are set close together or the wrong way round: without
- * it, a 30-second advertisement shown "every 30 seconds" would never be off
- * the screen, and the wall would be an advertisement with a boat occasionally
- * behind it.
- */
-const MIN_GAP_MS = 3000;
-
 /** Never wait longer than this for a picture or a video to have a frame. */
 const READY_TIMEOUT_MS = 1500;
 
@@ -137,17 +125,15 @@ export function createOverlay(parent = document.body) {
     turn = window.setTimeout(rest, duration);
   }
 
-  /** Off the screen for a while, then round again. */
+  /**
+   * The break. Nothing on the wall for the configured seconds, then round to
+   * the next advertisement - which for a single one is the same one again.
+   */
   function rest() {
     hide();
 
     if (!running()) return;
-
-    const period = config.ads.frequencySec * 1000;
-    const duration = config.ads.durationSec * 1000;
-    const gap = Math.max(MIN_GAP_MS, period - duration);
-
-    turn = window.setTimeout(show, gap);
+    turn = window.setTimeout(show, config.ads.gapSec * 1000);
   }
 
   function restart() {
@@ -178,7 +164,7 @@ export function createOverlay(parent = document.body) {
       // save that only moved a logo would cut an advertisement off mid-show.
       const key = (s) =>
         s
-          ? `${s.ads.enabled}|${s.ads.frequencySec}|${s.ads.durationSec}|${s.ads.items.map((i) => i.url).join()}`
+          ? `${s.ads.enabled}|${s.ads.gapSec}|${s.ads.durationSec}|${s.ads.items.map((i) => i.url).join()}`
           : '';
 
       if (key(before) !== key(settings)) restart();

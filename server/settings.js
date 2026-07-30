@@ -31,8 +31,14 @@ function defaults() {
     ads: {
       enabled: false,
       placement: 'bottom',
+
+      // How long one advertisement stays on the wall...
       durationSec: 10,
-      frequencySec: 90,
+
+      // ...and how long the wall is clear before the next one. The two of them
+      // are the whole cycle: shown, break, shown, break, round and round.
+      gapSec: 20,
+
       items: [],
     },
   };
@@ -90,13 +96,32 @@ function cleanAds(input, fallback) {
     .filter(Boolean)
     .slice(0, MAX_ADS);
 
+  const durationSec = clamp(ads.durationSec, 1, 120, fallback.durationSec);
+
   return {
     enabled: Boolean(ads.enabled) && items.length > 0,
     placement: PLACEMENTS.includes(ads.placement) ? ads.placement : fallback.placement,
-    durationSec: clamp(ads.durationSec, 1, 120, fallback.durationSec),
-    frequencySec: clamp(ads.frequencySec, 5, 3600, fallback.frequencySec),
+    durationSec,
+    gapSec: breakBetween(ads, durationSec, fallback.gapSec),
     items,
   };
+}
+
+/**
+ * How long the wall stays clear between advertisements.
+ *
+ * Settings saved before this field existed carried a frequency instead - how
+ * often an advertisement *started* - and the break was whatever was left over
+ * once it had been on screen. Those are read back as the break they worked out
+ * to, so a kiosk that has been set up already keeps the timing it had.
+ */
+function breakBetween(ads, durationSec, fallback) {
+  if (ads.gapSec !== undefined) return clamp(ads.gapSec, 1, 600, fallback);
+
+  const frequency = Number(ads.frequencySec);
+  if (Number.isFinite(frequency)) return clamp(frequency - durationSec, 1, 600, fallback);
+
+  return fallback;
 }
 
 /** Everything the panel can send, put through a sieve. */

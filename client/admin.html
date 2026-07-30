@@ -175,12 +175,12 @@
             </select>
           </div>
           <div>
-            <label for="adDuration">Duration (seconds)</label>
+            <label for="adDuration">Show for (seconds)</label>
             <input type="number" id="adDuration" min="1" max="120" step="1" />
           </div>
           <div>
-            <label for="adFrequency">Every (seconds)</label>
-            <input type="number" id="adFrequency" min="5" max="3600" step="5" />
+            <label for="adGap">Then break for (seconds)</label>
+            <input type="number" id="adGap" min="1" max="600" step="1" />
           </div>
           <div style="flex: 1 1 240px">
             <label for="adFile">Add images or videos <span id="adCount"></span></label>
@@ -190,10 +190,12 @@
 
         <ul class="ads" id="adList"></ul>
 
+        <p class="note" id="adCycle"></p>
+
         <p class="note">
-          Advertisements are shown in the order below, one each time round.
-          They never cover a boat — while one is crossing the wall, the next
-          advertisement waits its turn.
+          Advertisements are shown in the order below, one each time round, and
+          the break comes after every one of them. They keep to this cycle
+          whether or not a boat is crossing the wall.
         </p>
       </section>
 
