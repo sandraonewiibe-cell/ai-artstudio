@@ -99,29 +99,19 @@ export class Stage {
     this.paddles = [];
     this.splashes = [];
 
-    // The drawing on screen is `this.boat` and only ever `this.boat` - the scan
-    // as it arrived, in one piece, with nothing taken out of it or laid over
-    // the top of it but the oars themselves.
+    // `this.boat` is the only image on screen, ever. The scan as it arrived,
+    // in one piece, with nothing taken out of it and nothing laid on top of it.
     //
-    // The oar images are the one thing loaded besides it. Each is a copy of an
-    // oar the visitor drew, and gets rowed about its own pivot on its own
-    // phase; the drawing underneath keeps every pixel it had. If any of them
-    // fails to load, all of them are dropped and nothing rows - a still drawing
-    // is right, half a set of moving oars is not.
+    // The oars are not drawn a second time and do not move. A drawn line cannot
+    // be made to swing without its original staying put behind it, so rowing a
+    // copy showed two of every oar - which is what looked like the drawing had
+    // been cut apart. They are left exactly where the visitor drew them.
+    //
+    // What arrives here is only where each blade is. No images, no copies -
+    // positions, so the water knows where the oars are entering it.
     if (job.layers && job.layers.paddles && job.layers.paddles.length) {
-      try {
-        this.paddles = await Promise.all(
-          job.layers.paddles.map(async (paddle) => ({
-            ...paddle,
-            image: await loadImage(paddle.url),
-            lastPhase: 0,
-          }))
-        );
-        console.log(`[stage] rowing ${this.paddles.length} oar(s)`);
-      } catch (err) {
-        console.warn('[stage] oar layers unusable, showing the flat boat:', err.message);
-        this.paddles = [];
-      }
+      this.paddles = job.layers.paddles.map((paddle) => ({ ...paddle, lastPhase: 0 }));
+      console.log(`[stage] ${this.paddles.length} oar(s) working the water`);
     }
 
     // Inflate the drawing into a solid. Built from the whole drawing, oars
@@ -234,11 +224,11 @@ export class Stage {
     } else {
       this.drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
 
-      // Oars are positioned in the flat drawing's own frame, so they line up
-      // with the flat hull and not with a rotated model. In 3D they are part of
-      // the mesh instead - visible, but not rowing.
+      // Nothing is drawn for the oars - they are already in the hull image,
+      // where they were drawn. This only works out where their blades are and
+      // lets the water react to them.
       if (this.paddles.length) {
-        this.drawPaddles(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
+        this.workTheWater(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
       }
     }
 
@@ -249,74 +239,45 @@ export class Stage {
   }
 
   /**
-   * Rows each oar about the point where it meets the hull.
+   * The water working around the blades. Draws nothing.
    *
-   * Oars are rigid - they swing rather than bend - so they are drawn inside
-   * the hull's transform but not through its slicing. A small lag down the
-   * line stops them moving as one block, which is what real rowing looks like.
+   * The oars themselves are part of the hull image and stay where they were
+   * drawn. What is still on a rhythm is the water: each blade bites once per
+   * stroke and throws, and the oars lag slightly down the line, so the splashes
+   * ripple along the boat the way they would if it were being rowed hard.
    *
-   * Each oar does take the one displacement its own slice of the hull has, at
-   * the point where it is held. Without that it swings about a pivot that is
-   * standing still while the plank under it rides the swell, and the oar reads
-   * as a loose piece floating beside the boat rather than as part of it.
+   * The rhythm is the one the oars used to swing on - same period, same
+   * stagger, same point in the cycle - so the boat reads as being rowed even
+   * though nothing about the drawing moves. It runs for as long as the boat is
+   * on screen; there is no stroke count and nothing winds down.
+   *
+   * The blade takes the displacement its own slice of the hull has, so it stays
+   * with the boat as the swell passes under it and the splash lands where the
+   * oar actually is.
    */
-  drawPaddles(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
-    const { ctx } = this;
-    const { periodMs, sweepDegrees, lagPerOar, catchPhase } = PADDLES.stroke;
-    const sweep = (sweepDegrees * Math.PI) / 180;
-
-    ctx.save();
-    ctx.translate(centreX, centreY);
-    ctx.rotate(tilt);
+  workTheWater(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
+    const { periodMs, lagPerOar, catchPhase } = PADDLES.stroke;
 
     this.paddles.forEach((paddle, index) => {
       const phase = wrap(elapsed / periodMs - index * lagPerOar);
-      const angle = Math.sin(phase * Math.PI * 2) * (sweep / 2);
 
-      // Local frame: the drawing's box runs from -boatW/2 to +boatW/2.
-      const pivotX = -boatW / 2 + paddle.pivot.x * boatW;
-      const pivotY = -boatH / 2 + paddle.pivot.y * boatH;
-
-      // The same residual drawHull() gives the slice at this x, so the oar
-      // rides with the piece of hull it is attached to. Identical arithmetic,
-      // sampled at one point instead of every slice.
-      const ride =
-        (this.waveAt(centreX + pivotX, elapsed) - (lift + slope * pivotX)) * WAVES.flex;
-
-      ctx.save();
-      ctx.translate(0, ride);
-      ctx.translate(pivotX, pivotY);
-      ctx.rotate(angle);
-      ctx.translate(-pivotX, -pivotY);
-      ctx.drawImage(
-        paddle.image,
-        -boatW / 2 + paddle.rect.x * boatW,
-        -boatH / 2 + paddle.rect.y * boatH,
-        paddle.rect.width * boatW,
-        paddle.rect.height * boatH
-      );
-      ctx.restore();
-
-      // The catch: the blade bites the water once per stroke, and throws.
       if (crossed(paddle.lastPhase, phase, catchPhase)) {
+        // Local frame: the drawing's box runs from -boatW/2 to +boatW/2.
         const tipX = -boatW / 2 + paddle.tip.x * boatW;
         const tipY = -boatH / 2 + paddle.tip.y * boatH;
-        const swung = rotateAbout(tipX, tipY, pivotX, pivotY, angle);
 
-        // `ride` carried through so the droplets still start at the blade.
-        // Nothing about the splash itself changes.
-        const bladeY = swung.y + ride;
+        const ride =
+          (this.waveAt(centreX + tipX, elapsed) - (lift + slope * tipX)) * WAVES.flex;
+        const bladeY = tipY + ride;
 
         this.spawnSplash(
-          centreX + swung.x * Math.cos(tilt) - bladeY * Math.sin(tilt),
-          centreY + swung.x * Math.sin(tilt) + bladeY * Math.cos(tilt)
+          centreX + tipX * Math.cos(tilt) - bladeY * Math.sin(tilt),
+          centreY + tipX * Math.sin(tilt) + bladeY * Math.cos(tilt)
         );
       }
 
       paddle.lastPhase = phase;
     });
-
-    ctx.restore();
   }
 
   /** A handful of droplets thrown up where a blade entered the water. */
@@ -577,15 +538,6 @@ function crossed(previous, current, mark) {
   return previous < current
     ? previous < mark && current >= mark
     : previous < mark || current >= mark; // wrapped past 1
-}
-
-function rotateAbout(x, y, cx, cy, angle) {
-  const dx = x - cx;
-  const dy = y - cy;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
 }
 
 function loadImage(url) {

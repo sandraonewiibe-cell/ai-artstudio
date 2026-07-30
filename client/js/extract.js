@@ -115,19 +115,21 @@ export function extractDrawing(pageCanvas) {
 }
 
 /**
- * Measures the oars so each can be rowed on the display.
+ * Finds where the oars are, so the water can react to them.
  *
- * Nothing here changes what is shown. The drawing goes to the wall exactly as
- * it was scanned, in one piece; this only works out where each oar is, what
- * shape it has, and which point it turns about, so a moving copy can be laid
- * over it. The masks and the labelling live for the length of this call and
- * never reach a screen.
+ * Nothing here changes what is shown, and nothing here is ever shown. The
+ * drawing goes to the wall exactly as it was scanned, in one piece, oars
+ * included and where the visitor put them. This only works out where each
+ * blade enters the water, so the display can throw a splash from it.
  *
- * Returns null when the drawing has no oars in it, or when the read of them is
- * not trustworthy - in either case the display shows the untouched drawing and
- * nothing rows.
+ * No layer is produced any more - not of the hull, not of an oar. The masks and
+ * the labelling live for the length of this call and are then gone; two points
+ * per oar are all that leave the browser.
  *
- * @returns {{paddles: object[]}|null}
+ * Returns null when the drawing has no oars in it, in which case the boat
+ * sails on the swell with no splashes.
+ *
+ * @returns {{paddles: {pivot: object, tip: object}[]}|null}
  */
 function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
   const { width, height, strokes } = base;
@@ -139,12 +141,9 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
     drawingBounds,
     hullBounds
   );
-  const { paddles, appendageMask, interiorMask } = detected;
+  const { paddles } = detected;
   if (!paddles.length) return null;
 
-  // No hull layer is produced. There is nothing for one to be: the drawing is
-  // shown whole and unaltered, so a second copy of it - cut, covered or plain -
-  // would only be another thing that could end up on screen by mistake.
   const cropW = rect.x1 - rect.x0 + 1;
   const cropH = rect.y1 - rect.y0 + 1;
 
@@ -155,45 +154,21 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
     y: (point.y - rect.y0) / cropH,
   });
 
-  const rendered = paddles
-    .map((paddle) => {
-      const interior = paddle.mode === 'interior';
-      const region = interior ? interiorMask : appendageMask;
-      const source = interior ? detected.interiorLabels : detected.appendageLabels;
-
-      const mask = new Uint8Array(fill.length);
-      for (let i = 0; i < fill.length; i += 1) {
-        if (region[i] && source[i] === paddle.label) mask[i] = 1;
-      }
-
-      const oarRect = cropRect(paddle.bounds, width, height);
-      const layer = renderLayer({ ...base, fill: mask, rect: oarRect });
-      if (!layer) return null;
-
-      return {
-        canvas: layer.canvas,
-        rect: {
-          x: (oarRect.x0 - rect.x0) / cropW,
-          y: (oarRect.y0 - rect.y0) / cropH,
-          width: (oarRect.x1 - oarRect.x0 + 1) / cropW,
-          height: (oarRect.y1 - oarRect.y0 + 1) / cropH,
-        },
-        pivot: relative(paddle.pivot),
-        tip: relative(paddle.tip),
-      };
-    });
-
-  // All of them or none.
+  // Two points per oar, and nothing else.
   //
-  // An oar that could not be measured is a sign the read of this drawing is
-  // doubtful, and a doubtful read is exactly when animating is worst: a region
-  // gets separated that was never an oar. Dropping just the bad one used to
-  // leave the rest rowing on that same doubtful read. Standing the whole thing
-  // down instead costs an animation and keeps the drawing as the visitor made
-  // it, which is the cheaper mistake by far.
-  if (!rendered.length || rendered.some((paddle) => !paddle)) return null;
+  // No image of an oar is cut out, because none is needed: the oars are drawn
+  // where the visitor drew them and they stay there. All the display wants is
+  // where each blade meets the water, so it can throw a splash from it. With no
+  // oar image in existence there is nothing that could be shown as a loose
+  // piece, by this or by any later change.
+  const measured = paddles.map((paddle) => ({
+    pivot: relative(paddle.pivot),
+    tip: relative(paddle.tip),
+  }));
 
-  return { paddles: rendered };
+  if (!measured.length) return null;
+
+  return { paddles: measured };
 }
 
 /** Crop box for a set of bounds, with breathing room, clamped to the page. */

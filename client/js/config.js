@@ -340,10 +340,19 @@ export const PADDLES = {
     maxAreaShare: 0.12,
   },
 
-  // The rowing stroke.
+  /**
+   * The rowing stroke - now the rhythm of the water rather than of the oars.
+   *
+   * The oars themselves do not move. A drawn line cannot be swung without its
+   * original staying put behind it, so animating a copy showed two of every
+   * oar; they are left where the visitor drew them. What kept the rowing is
+   * the water: each blade bites once per stroke on this cycle and throws a
+   * splash, and it carries on for as long as the boat is on screen.
+   *
+   * There is no sweep angle any more, because nothing swings.
+   */
   stroke: {
     periodMs: 2200,
-    sweepDegrees: 24,
 
     // Oars on opposite sides of the hull pull together; along the hull they
     // lag slightly, which gives the ripple down the boat that rowing has.

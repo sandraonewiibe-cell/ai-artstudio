@@ -98,15 +98,15 @@ async function run(job, paperBuffer, drawingBuffer, layers) {
   job.transparent = generated.transparent;
   job.standIn = generated.standIn;
 
-  // 5. Oar layers, if the drawing had any.
+  // 5. Where the oars are, if the drawing had any.
   //
-  // Only attached for a stand-in result. A real provider returns one flat
-  // generated boat, and oars cut from the visitor's *drawing* would not line
-  // up with it - so animating them would be worse than not. A provider that
-  // wants rowing oars has to return its own layers.
+  // Only attached for a stand-in result. A real provider returns its own boat,
+  // and blade positions measured from the visitor's *drawing* would not fall
+  // where that boat's oars are - so the splashes would come up in the wrong
+  // places. A provider that wants them has to return its own.
   if (layers && generated.standIn) {
-    job.layers = saveLayers(prefix, layers);
-    if (job.layers) console.log(`[pipeline] ${job.layers.paddles.length} oar layer(s)`);
+    job.layers = oarPositions(layers);
+    if (job.layers) console.log(`[pipeline] ${job.layers.paddles.length} oar position(s)`);
   }
 
   job.stage = 'done';
@@ -114,38 +114,25 @@ async function run(job, paperBuffer, drawingBuffer, layers) {
 }
 
 /**
- * Writes the oar images, returning the URLs the display will load.
+ * Where the oars are, passed through for the display.
  *
- * The oars and nothing else. There is no second copy of the drawing here: the
- * display shows the generated image whole and lays these over it, so a hull
- * layer would be an unused duplicate on disk and one more thing that could
- * reach a screen by accident.
+ * Nothing is written to disk. There are no oar images any more and no hull
+ * layer: the display shows the generated image whole, with the oars already in
+ * it, and uses these points only to know where the blades are entering the
+ * water. Two coordinates per oar, so there is nothing to store and nothing that
+ * could be served up as a loose piece of someone's drawing.
  */
-function saveLayers(prefix, layers) {
-  try {
-    const paddles = layers.paddles.map((paddle, index) => ({
-      url: storage.save('images', `${prefix}-oar-${index}.png`, paddle.buffer).url,
-      rect: paddle.rect,
-      pivot: paddle.pivot,
-      tip: paddle.tip,
-    }));
-
-    return paddles.length ? { paddles } : null;
-  } catch (err) {
-    // Losing the oars costs an animation, not the session.
-    console.warn('[pipeline] could not store oar layers:', err.message);
-    return null;
-  }
+function oarPositions(layers) {
+  const paddles = layers.paddles.filter((paddle) => paddle.pivot && paddle.tip);
+  return paddles.length ? { paddles } : null;
 }
 
-/** Decodes the oar images posted by the scanner. */
+/** Reads the oar positions posted by the scanner. */
 function decodeLayers(layers) {
   if (!layers || !Array.isArray(layers.paddles) || !layers.paddles.length) return null;
 
   return {
     paddles: layers.paddles.map((paddle) => ({
-      buffer: storage.decodeDataUrl(paddle.data),
-      rect: paddle.rect,
       pivot: paddle.pivot,
       tip: paddle.tip,
     })),
