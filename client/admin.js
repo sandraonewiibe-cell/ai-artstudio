@@ -17,6 +17,9 @@ const TOKEN_KEY = 'aiartstudio.adminToken';
 /** Held here between load and save, so the file inputs stay one-shot. */
 let settings = null;
 
+/** How many advertisements the server will keep. Told to us on the first read. */
+let maxAds = Infinity;
+
 // --- talking to the server ---------------------------------------------------
 
 function headers() {
@@ -107,6 +110,12 @@ function paintAds() {
   el('adDuration').value = ads.durationSec;
   el('adFrequency').value = ads.frequencySec;
 
+  const full = ads.items.length >= maxAds;
+  el('adCount').textContent = Number.isFinite(maxAds)
+    ? `(${ads.items.length} of ${maxAds})`
+    : `(${ads.items.length})`;
+  el('adFile').disabled = full;
+
   const list = el('adList');
   list.replaceChildren();
 
@@ -121,6 +130,11 @@ function paintAds() {
   ads.items.forEach((item, index) => {
     const row = document.createElement('li');
 
+    // Position in the rotation, since the order on screen is the order here.
+    const order = document.createElement('span');
+    order.className = 'order';
+    order.textContent = index + 1;
+
     const media =
       item.type === 'video'
         ? Object.assign(document.createElement('video'), { src: item.url, muted: true })
@@ -130,18 +144,39 @@ function paintAds() {
     name.className = 'name';
     name.textContent = `${item.type} — ${item.url.replace('/media/', '')}`;
 
+    row.append(order, media, name, move(index, -1, '↑'), move(index, 1, '↓'));
+
     const remove = document.createElement('button');
     remove.className = 'danger';
     remove.textContent = 'Remove';
     remove.addEventListener('click', () => {
       settings.ads.items.splice(index, 1);
       paintAds();
-      show('Removed. Save to apply.', '');
+      show('Removed. Save to apply.');
     });
 
-    row.append(media, name, remove);
+    row.appendChild(remove);
     list.appendChild(row);
   });
+}
+
+/** Nudges an advertisement up or down the running order. */
+function move(index, by, label) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.title = by < 0 ? 'Show earlier' : 'Show later';
+
+  const target = index + by;
+  button.disabled = target < 0 || target >= settings.ads.items.length;
+
+  button.addEventListener('click', () => {
+    const items = settings.ads.items;
+    [items[index], items[target]] = [items[target], items[index]];
+    paintAds();
+    show('Reordered. Save to apply.');
+  });
+
+  return button;
 }
 
 function paint() {
@@ -169,7 +204,13 @@ function collect() {
 
 async function load() {
   try {
-    settings = await send('/api/settings', { method: 'GET' });
+    const body = await send('/api/settings', { method: 'GET' });
+
+    // The server says how many advertisements it will keep; the panel stops
+    // there rather than letting somebody upload past it and lose them on save.
+    if (body.limits && Number.isFinite(body.limits.ads)) maxAds = body.limits.ads;
+
+    settings = body;
     paint();
     show('');
   } catch (err) {
@@ -197,22 +238,52 @@ async function load() {
   });
 });
 
+/**
+ * Takes however many files were chosen at once.
+ *
+ * One at a time rather than all together on purpose: an advertisement can be a
+ * video, and firing a dozen of those at the server in parallel is how you make
+ * a kiosk feel broken. Each one appears in the list as it lands, so a slow
+ * upload looks like progress rather than like nothing happening.
+ */
 el('adFile').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
+  const chosen = [...event.target.files];
+  if (!chosen.length) return;
 
-  show('Uploading…');
-  try {
-    const stored = await upload(file, 'ad');
-    settings.ads.items.push({ id: stored.url, url: stored.url, type: stored.type });
-    settings.ads.enabled = true;
-    paintAds();
-    show('Uploaded. Save to apply.', 'good');
-  } catch (err) {
-    show(err.message, 'error');
-  } finally {
-    event.target.value = '';
+  const room = maxAds - settings.ads.items.length;
+  const files = chosen.slice(0, Math.max(0, room));
+
+  let added = 0;
+  let failed = 0;
+
+  for (const [index, file] of files.entries()) {
+    show(files.length > 1 ? `Uploading ${index + 1} of ${files.length}…` : 'Uploading…');
+
+    try {
+      const stored = await upload(file, 'ad');
+      settings.ads.items.push({ id: stored.url, url: stored.url, type: stored.type });
+      settings.ads.enabled = true;
+      added += 1;
+      paintAds();
+    } catch (err) {
+      failed += 1;
+      console.warn(`[admin] ${file.name} did not upload:`, err.message);
+    }
   }
+
+  event.target.value = '';
+
+  // Say what happened to every file, including the ones that did not fit -
+  // silently dropping somebody's last three uploads reads as a bug.
+  const parts = [];
+  if (added) parts.push(`Added ${added}.`);
+  if (failed) parts.push(`${failed} failed — see the console.`);
+  if (chosen.length > files.length) {
+    parts.push(`${chosen.length - files.length} not added: ${maxAds} is the most.`);
+  }
+  parts.push('Save to apply.');
+
+  show(parts.join(' '), failed || chosen.length > files.length ? 'error' : 'good');
 });
 
 el('save').addEventListener('click', async () => {

@@ -179,9 +179,15 @@ app.get('/api/recordings/latest', (req, res) => {
 // touches a session: the scanner, the reading, the generation and the QR run
 // exactly as they did whether these are set or not.
 
-/** What the display should be showing. Read by the wall, so never gated. */
+/**
+ * What the display should be showing. Read by the wall, so never gated.
+ *
+ * `limits` rides along for the panel's benefit - it caps the advertisement
+ * list, and a cap nobody is told about is one that looks like a bug the first
+ * time it silently drops somebody's twelfth upload. Saving ignores it.
+ */
 app.get('/api/settings', (req, res) => {
-  res.json(settings.get());
+  res.json({ ...settings.get(), limits: { ads: settings.MAX_ADS } });
 });
 
 /**

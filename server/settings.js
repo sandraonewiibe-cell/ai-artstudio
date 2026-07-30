@@ -152,4 +152,4 @@ function save(input) {
   return current;
 }
 
-module.exports = { get, load, save, defaults, PLACEMENTS };
+module.exports = { get, load, save, defaults, PLACEMENTS, MAX_ADS };

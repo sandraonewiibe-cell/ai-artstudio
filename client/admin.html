@@ -77,6 +77,14 @@
       }
       ul.ads img, ul.ads video { height: 44px; width: 68px; object-fit: cover; border-radius: 4px; background: #0c0e11; }
       ul.ads .name { flex: 1; font-size: .85rem; color: #9aa2b1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      ul.ads .order {
+        min-width: 1.6rem; text-align: center; font-size: .8rem; color: #6f7887;
+        border: 1px solid #2a2f38; border-radius: 4px; padding: .15rem 0;
+      }
+      ul.ads button { padding: .3rem .55rem; }
+      ul.ads button:disabled { opacity: .35; cursor: default; }
+      input[type="file"]:disabled { opacity: .4; }
+      #adCount { color: #6f7887; }
 
       button {
         font: inherit; border-radius: 6px; padding: .5rem .9rem; cursor: pointer;
@@ -174,17 +182,18 @@
             <label for="adFrequency">Every (seconds)</label>
             <input type="number" id="adFrequency" min="5" max="3600" step="5" />
           </div>
-          <div style="flex: 1 1 200px">
-            <label for="adFile">Add image or video</label>
-            <input type="file" id="adFile" accept="image/*,video/*" />
+          <div style="flex: 1 1 240px">
+            <label for="adFile">Add images or videos <span id="adCount"></span></label>
+            <input type="file" id="adFile" accept="image/*,video/*" multiple />
           </div>
         </div>
 
         <ul class="ads" id="adList"></ul>
 
         <p class="note">
-          Advertisements never cover a boat — while one is crossing the wall,
-          the next advertisement waits its turn.
+          Advertisements are shown in the order below, one each time round.
+          They never cover a boat — while one is crossing the wall, the next
+          advertisement waits its turn.
         </p>
       </section>
 
