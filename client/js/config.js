@@ -267,6 +267,19 @@ export const EXTRACT = {
      * halves come out very nearly the same colour).
      */
     hueBuckets: 12,
+
+    /**
+     * Whether the child's own strokes survive inside a coloured area.
+     *
+     * On, the colour they laid down is kept exactly where they laid it - the
+     * strokes, the pressure, the grain, every wobble of the hand - and only the
+     * bare paper in the pits of the grain takes the area's colour. The scan is
+     * the texture; nothing here generates one.
+     *
+     * Off, the whole area becomes a single flat colour. That reads cleanly at
+     * distance and loses the hand that drew it.
+     */
+    keepTexture: true,
   },
 
   /**
@@ -328,19 +341,23 @@ export const EXTRACT = {
    * saturation above 0 to bring the colour lift back.
    */
   boost: {
-    // How far towards full saturation a coloured-in area is pushed. 0 fills the
-    // exact scanned RGB, which is what this does now.
-    saturation: 0,
+    /**
+     * How far towards full saturation a colour is taken.
+     *
+     * Small on purpose. A faint green becomes more definitely that green so it
+     * carries down a hall, and stays the green the child chose. Hue does not
+     * move, and neither does lightness: a colour may become more itself, never
+     * darker and never a different colour.
+     *
+     * 0 reproduces the scanned RGB bit for bit.
+     */
+    saturation: 0.15,
 
-    // ...and a floor, so a washed-out crayon still arrives as a colour. Only
-    // consulted when saturation is on.
+    // A floor under saturation, for a crayon that photographed as almost no
+    // colour at all. Left at 0: a floor would push every faint colour to the
+    // same strength, which is a colour being decided here rather than on the
+    // page. Only consulted when saturation is on.
     minSaturation: 0,
-
-    // Lightness is pulled into this band. Too dark and the colour reads black
-    // on a wall; too light and it washes out under the projector. Only
-    // consulted when saturation is on.
-    minLightness: 0.34,
-    maxLightness: 0.62,
 
     // How much darker ink goes: outline, handwriting, anything drawn in
     // pencil. 1 would be black.
@@ -609,9 +626,26 @@ export const MODEL3D = {
   nodDegrees: 3.5,
   nodPeriodMs: 7300,
 
-  // Direction the light comes from, and how much fills the shadows.
+  // Direction the light comes from.
   light: [0.35, 0.75, 0.85],
-  ambient: 0.55,
+
+  /**
+   * How far the lighting moves the drawing, either side of leaving it alone.
+   *
+   * This replaces an ambient term that multiplied the artwork by 0.55 wherever
+   * a surface faced away from the lamp. That is what turned white paper into
+   * mid grey and a light green pencil into slate: the drawing was being
+   * darkened by the lighting model rather than by anything on the page.
+   *
+   * The lamp now only lifts. A face turned away from it is the drawing exactly
+   * as it was scanned, and a lit face rises this far towards white - so no
+   * colour anywhere on the boat is ever darker than the child drew it. At 0.12
+   * that is a gentle sheen across the hull, enough to read as a solid without
+   * the artwork being painted over to get it.
+   *
+   * 0 leaves the drawing exactly as scanned, lit flat.
+   */
+  relief: 0.12,
 };
 
 /**

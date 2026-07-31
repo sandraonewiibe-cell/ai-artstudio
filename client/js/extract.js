@@ -835,6 +835,7 @@ function renderLayer({
   const dst = out.data;
   const softness = EXTRACT.softness;
   const { chromaThreshold, washMargin } = EXTRACT.fill;
+  const { keepTexture } = EXTRACT.paint;
 
   let inkPixels = 0;
 
@@ -887,9 +888,21 @@ function renderLayer({
         const isInk = chroma <= chromaThreshold && luma[si] < reference[si] - washMargin;
 
         if (!keepOwn && painted) {
-          dst[di] = painted.r;
-          dst[di + 1] = painted.g;
-          dst[di + 2] = painted.b;
+          // Inside an area the visitor coloured in.
+          //
+          // The colour they laid down is kept exactly where they laid it, so
+          // the strokes, the pressure, the grain and every wobble of a hand
+          // survive - the scan is the texture, not a colour generated from it.
+          // Only the bare paper in the pits of the grain takes the area's
+          // colour, which is what stops a filled boat reading as speckled.
+          //
+          // Set EXTRACT.paint.keepTexture false to go back to one flat colour
+          // across the whole area.
+          const mine = keepTexture && chroma > chromaThreshold ? vivid(r, g, b) : painted;
+
+          dst[di] = mine.r;
+          dst[di + 1] = mine.g;
+          dst[di + 2] = mine.b;
         } else if (own) {
           const ink = isInk ? deepen(r, g, b) : null;
           dst[di] = ink ? ink.r : r;
@@ -983,16 +996,23 @@ function growBy(mask, width, height, radius) {
  * out as the colour the visitor was reaching for.
  */
 function vivid(r, g, b) {
-  const { saturation, minSaturation, minLightness, maxLightness } = EXTRACT.boost;
+  const { saturation, minSaturation } = EXTRACT.boost;
   if (!saturation && !minSaturation) return { r, g, b };
 
   const [hue, sat, light] = toHsl(r, g, b);
   if (!sat) return { r, g, b }; // a grey has no colour to deepen
 
+  // Saturation moves. Hue and lightness do not.
+  //
+  // Lightness used to be pulled into a band here, which was a mistake waiting
+  // to happen: a light green pencil sits at 0.81 and the band topped out at
+  // 0.62, so the moment any saturation was asked for, a pale colour would have
+  // been dragged a third of the way to dark. The rule is that a colour may
+  // become more itself and never darker or different, and a change of lightness
+  // is both.
   const richer = Math.max(minSaturation, sat + (1 - sat) * saturation);
-  const level = Math.min(maxLightness, Math.max(minLightness, light));
 
-  return toRgb(hue, richer, level);
+  return toRgb(hue, richer, light);
 }
 
 /**

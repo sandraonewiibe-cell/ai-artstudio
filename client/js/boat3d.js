@@ -40,7 +40,7 @@ const FRAGMENT_SHADER = `
 
   uniform sampler2D uTexture;
   uniform vec3 uLight;
-  uniform float uAmbient;
+  uniform float uRelief;
 
   varying vec2 vUv;
   varying vec3 vNormal;
@@ -56,8 +56,28 @@ const FRAGMENT_SHADER = `
     vec3 normal = gl_FrontFacing ? vNormal : -vNormal;
     float diffuse = max(dot(normal, normalize(uLight)), 0.0);
 
-    float light = uAmbient + (1.0 - uAmbient) * diffuse;
-    gl_FragColor = vec4(colour.rgb * light, colour.a);
+    // Shading sits either side of the drawing rather than underneath it.
+    //
+    // This used to be a plain multiply by an ambient-to-one term, which meant
+    // every fragment facing away from the lamp was scaled towards black: white
+    // paper came out mid grey and a light green pencil came out slate. The
+    // child's colour was being darkened by the lighting model, not by anything
+    // on the page.
+    //
+    // The lamp can only lift, never darken. Nothing the lighting does may make
+    // a colour darker than the child drew it - that is the whole fault this
+    // replaced - so the drawing is the floor, and a lit face rises off it
+    // towards the light. A face turned away is simply the drawing, untouched.
+    //
+    // Form comes from the gradient between the two, from the silhouette, and
+    // from the whole hull rocking on the water. None of that needs the artwork
+    // painted over to work.
+    //
+    // Towards white rather than up in value, so a bright area cannot clip to a
+    // flat highlight and lose the pencil texture in it.
+    vec3 shaded = mix(colour.rgb, vec3(1.0), uRelief * diffuse);
+
+    gl_FragColor = vec4(shaded, colour.a);
   }
 `;
 
@@ -111,7 +131,7 @@ export class Boat3D {
       projection: gl.getUniformLocation(this.program, 'uProjection'),
       texture: gl.getUniformLocation(this.program, 'uTexture'),
       light: gl.getUniformLocation(this.program, 'uLight'),
-      ambient: gl.getUniformLocation(this.program, 'uAmbient'),
+      relief: gl.getUniformLocation(this.program, 'uRelief'),
     };
 
     this.buffers = {
@@ -235,7 +255,7 @@ export class Boat3D {
     gl.uniform1i(this.uniforms.texture, 0);
 
     gl.uniform3fv(this.uniforms.light, MODEL3D.light);
-    gl.uniform1f(this.uniforms.ambient, MODEL3D.ambient);
+    gl.uniform1f(this.uniforms.relief, MODEL3D.relief);
 
     const model = modelMatrix({
       pitch: pose.pitch || 0,
