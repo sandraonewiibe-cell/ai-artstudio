@@ -256,6 +256,47 @@ export const EXTRACT = {
      */
     hueBuckets: 12,
   },
+
+  /**
+   * Making the drawing carry to the back of a hall.
+   *
+   * A pencil sketch photographed on white paper is a pale thing. On a desk it
+   * reads fine; forty feet away on a bright wall the outline goes grey, the
+   * handwriting disappears and a crayon fill looks like a stain. None of that
+   * is the visitor's drawing being wrong - it is a scan being faithful to
+   * paper, which is not what it has to survive.
+   *
+   * Two adjustments, and both keep what was drawn:
+   *
+   *   - colour gets its saturation back, with the hue untouched. The number
+   *     that says "which colour" is carried through exactly; only the number
+   *     that says "how much of it" moves.
+   *   - ink goes darker. Outline and handwriting are the same thing to this -
+   *     both are pencil, both are what makes the drawing readable, and neither
+   *     changes shape by being deepened.
+   *
+   * Set any of these to 0 to leave that part exactly as scanned.
+   */
+  boost: {
+    // How far towards full saturation a coloured-in area is pushed...
+    saturation: 0.45,
+
+    // ...and a floor, so a washed-out crayon still arrives as a colour.
+    minSaturation: 0.34,
+
+    // Lightness is pulled into this band. Too dark and the colour reads black
+    // on a wall; too light and it washes out under the projector.
+    minLightness: 0.34,
+    maxLightness: 0.62,
+
+    // How much darker ink goes: outline, handwriting, anything drawn in
+    // pencil. 1 would be black.
+    inkDepth: 0.5,
+
+    // ...but never past this, so a soft pencil line keeps some of its
+    // greyness rather than becoming a printed rule.
+    inkFloor: 0.12,
+  },
 };
 
 export const DISPLAY = {

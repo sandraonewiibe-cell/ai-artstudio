@@ -302,9 +302,12 @@ function paintedRegions(page, width, height, bounds) {
 
         if (!claimed) return;
 
+        // Averaged, then given its saturation back. Done once here rather than
+        // per pixel: the area is one flat colour by this point, so there is one
+        // conversion per area instead of a hundred thousand.
         colours.push(
           n
-            ? { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) }
+            ? vivid(Math.round(r / n), Math.round(g / n), Math.round(b / n))
             : { r: 0, g: 0, b: 0 }
         );
       });
@@ -885,14 +888,20 @@ function renderLayer({
           chroma > chromaThreshold ||
           luma[si] < reference[si] - washMargin;
 
+        // Pencil rather than crayon: no colour to speak of, and darker than the
+        // paper around it. That is the outline, and it is also the handwriting -
+        // they are the same substance and want the same treatment.
+        const isInk = chroma <= chromaThreshold && luma[si] < reference[si] - washMargin;
+
         if (!keepOwn && painted) {
           dst[di] = painted.r;
           dst[di + 1] = painted.g;
           dst[di + 2] = painted.b;
         } else if (own) {
-          dst[di] = r;
-          dst[di + 1] = g;
-          dst[di + 2] = b;
+          const ink = isInk ? deepen(r, g, b) : null;
+          dst[di] = ink ? ink.r : r;
+          dst[di + 1] = ink ? ink.g : g;
+          dst[di + 2] = ink ? ink.b : b;
         } else {
           dst[di] = meanInk.r;
           dst[di + 1] = meanInk.g;
@@ -914,9 +923,14 @@ function renderLayer({
       const alpha = Math.max(0, Math.min(1, (local + softness - luma[si]) / softness));
       if (alpha <= 0.02) continue;
 
-      dst[di] = src[si * 4];
-      dst[di + 1] = src[si * 4 + 1];
-      dst[di + 2] = src[si * 4 + 2];
+      // The soft edge of a stroke is still that stroke, so it is deepened with
+      // it - otherwise every line would come out with a pale rim and the
+      // outline would look softer after being sharpened.
+      const edge = deepen(src[si * 4], src[si * 4 + 1], src[si * 4 + 2]);
+
+      dst[di] = edge.r;
+      dst[di + 1] = edge.g;
+      dst[di + 2] = edge.b;
       dst[di + 3] = Math.round(alpha * 255);
 
       inkPixels += 1;
@@ -958,6 +972,94 @@ function growBy(mask, width, height, radius) {
   }
 
   return out;
+}
+
+/**
+ * Gives a colour its saturation back, without changing which colour it is.
+ *
+ * Hue goes through untouched - the number that says "red" is carried across
+ * exactly. What moves is saturation, and lightness only far enough to sit in a
+ * band that reads on a wall. A crayon that photographed as a pale wash comes
+ * out as the colour the visitor was reaching for.
+ */
+function vivid(r, g, b) {
+  const { saturation, minSaturation, minLightness, maxLightness } = EXTRACT.boost;
+  if (!saturation && !minSaturation) return { r, g, b };
+
+  const [hue, sat, light] = toHsl(r, g, b);
+  if (!sat) return { r, g, b }; // a grey has no colour to deepen
+
+  const richer = Math.max(minSaturation, sat + (1 - sat) * saturation);
+  const level = Math.min(maxLightness, Math.max(minLightness, light));
+
+  return toRgb(hue, richer, level);
+}
+
+/**
+ * Darkens ink, so an outline and a line of handwriting both carry.
+ *
+ * Pencil on white paper photographs grey. Deepening is only a change of
+ * strength - no pixel moves, no stroke thickens, and the shape of every letter
+ * and every line is exactly what was drawn. The floor stops a soft pencil
+ * becoming a printed rule.
+ */
+function deepen(r, g, b) {
+  const { inkDepth, inkFloor } = EXTRACT.boost;
+  if (!inkDepth) return { r, g, b };
+
+  const [hue, sat, light] = toHsl(r, g, b);
+  const darker = Math.max(inkFloor, light * (1 - inkDepth));
+
+  return toRgb(hue, sat, darker);
+}
+
+function toHsl(r, g, b) {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const light = (max + min) / 2;
+  const chroma = max - min;
+
+  if (!chroma) return [0, 0, light];
+
+  const sat = light > 0.5 ? chroma / (2 - max - min) : chroma / (max + min);
+
+  let hue;
+  if (max === rn) hue = (gn - bn) / chroma + (gn < bn ? 6 : 0);
+  else if (max === gn) hue = (bn - rn) / chroma + 2;
+  else hue = (rn - gn) / chroma + 4;
+
+  return [hue / 6, sat, light];
+}
+
+function toRgb(hue, sat, light) {
+  if (!sat) {
+    const flat = Math.round(light * 255);
+    return { r: flat, g: flat, b: flat };
+  }
+
+  const q = light < 0.5 ? light * (1 + sat) : light + sat - light * sat;
+  const p = 2 * light - q;
+
+  return {
+    r: Math.round(channel(p, q, hue + 1 / 3) * 255),
+    g: Math.round(channel(p, q, hue) * 255),
+    b: Math.round(channel(p, q, hue - 1 / 3) * 255),
+  };
+}
+
+function channel(p, q, t) {
+  let value = t;
+  if (value < 0) value += 1;
+  if (value > 1) value -= 1;
+
+  if (value < 1 / 6) return p + (q - p) * 6 * value;
+  if (value < 1 / 2) return q;
+  if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+  return p;
 }
 
 /** True if any of the 8 neighbours is part of the filled shape. */
