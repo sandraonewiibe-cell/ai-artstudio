@@ -93,15 +93,29 @@ async function play(job) {
  * than a visitor will stand and watch.
  */
 async function modelArrived(id, model) {
-  if (!model || model.status !== 'ready' || !model.url) return;
+  if (!model) return;
+
+  // Every outcome says so. A model that never appears on the wall should leave
+  // a reason on the console, not silence and a flat boat.
+  if (model.status !== 'ready' || !model.url) {
+    console.warn(
+      `[3d] announced for ${id.slice(0, 8)} but not usable: status=${model.status}` +
+        (model.error ? ` - ${model.error}` : '')
+    );
+    return;
+  }
+
+  console.log(`[3d] announced for ${id.slice(0, 8)}: ${model.url}`);
 
   // Parsed and on the GPU straight away, whether or not it is wanted yet.
   await stage.preloadModel(model.url);
 
-  if (playing && playing.id === id) {
-    const shown = await stage.sculpt(model.url);
-    if (shown) console.log(`[display] ${id.slice(0, 8)} is now the generated model`);
+  if (!playing || playing.id !== id) {
+    console.log(`[3d] ready for ${id.slice(0, 8)}, held for its next crossing`);
+    return;
   }
+
+  await stage.sculpt(model.url);
 }
 
 /** Stops the recorder after RECORD_MS and posts what it captured. */

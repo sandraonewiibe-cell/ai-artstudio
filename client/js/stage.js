@@ -204,15 +204,28 @@ export class Stage {
       const { BoatGL, loadModel } = await boatgl();
 
       const scene = await loadModel(url);
-      if (!scene) return false;
+      if (!scene) {
+        console.warn('[3d] falling back to the flat boat: nothing parsed');
+        return false;
+      }
 
       if (!this.gl) this.gl = BoatGL.create();
-      if (!this.gl) return false;
+      if (!this.gl) {
+        console.warn('[3d] falling back to the flat boat: no renderer');
+        return false;
+      }
 
       this.gl.show(scene);
+
+      if (!this.sculpted) {
+        console.warn('[3d] falling back to the flat boat: the model went in but is not ready');
+        return false;
+      }
+
+      console.log('[3d] shown - the model has replaced the flat boat');
       return true;
     } catch (err) {
-      console.warn('[stage] could not show the model, staying flat:', err.message);
+      console.error(`[3d] FAILED at display: ${err.message}`);
       return false;
     }
   }

@@ -40,7 +40,7 @@ export class BoatGL {
     try {
       return new BoatGL();
     } catch (err) {
-      console.warn('[glb] WebGL unavailable, staying with the flat boat:', err.message);
+      console.error(`[3d] FAILED at renderer: WebGL unavailable - ${err.message}`);
       return null;
     }
   }
@@ -212,15 +212,34 @@ export async function loadModel(url) {
 
   if (!loader) loader = new GLTFLoader();
 
+  console.log(`[3d] downloading ${url}`);
+  const started = performance.now();
+
   const parse = loader
     .loadAsync(url)
     .then((gltf) => {
       const model = frame(gltf.scene);
       remember(url, model);
+
+      let meshes = 0;
+      let triangles = 0;
+      model.traverse((node) => {
+        if (!node.isMesh || !node.geometry) return;
+        meshes += 1;
+        const index = node.geometry.index;
+        const position = node.geometry.attributes.position;
+        triangles += (index ? index.count : position ? position.count : 0) / 3;
+      });
+
+      console.log(
+        `[3d] parsed ${url} in ${Math.round(performance.now() - started)}ms ` +
+          `(${meshes} mesh(es), ${Math.round(triangles)} triangles)`
+      );
+
       return model;
     })
     .catch((err) => {
-      console.warn(`[glb] could not load ${url}:`, err.message);
+      console.error(`[3d] FAILED at parse: ${url} - ${err.message}`);
       return null;
     });
 
