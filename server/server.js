@@ -281,6 +281,14 @@ function describe3D() {
       : `${name} - ${which} - NO TOKEN, so nothing will be generated`;
   }
 
+  if (name === 'huggingface') {
+    const { space, token, api } = config.huggingface;
+    if (!space) return `${name} - NO HF_SPACE_URL, so nothing will be generated`;
+
+    return `${name} - ${space}${api ? ` ${api}` : ' (endpoint chosen from the Space)'}` +
+      `${token ? ' - token present' : ' - anonymous'}`;
+  }
+
   return name;
 }
 

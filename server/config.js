@@ -161,7 +161,10 @@ module.exports = {
   enhancer: process.env.ENHANCER || 'passthrough',
 
   // Which image-to-3D provider to load from server/models3d/. 'none' is off.
-  model3d: process.env.MODEL3D || 'none',
+  //
+  // MODEL3D_PROVIDER is the name to use; MODEL3D is the older spelling of the
+  // same setting and still works, so an existing .env keeps running untouched.
+  model3d: process.env.MODEL3D_PROVIDER || process.env.MODEL3D || 'none',
 
   /** Everything the Replicate provider needs. Ignored by the others. */
   replicate: {
@@ -178,6 +181,25 @@ module.exports = {
     // Generous, because nobody is waiting on it. Long enough for a queue on a
     // busy afternoon, short enough that a wedged prediction is eventually let
     // go rather than held forever.
+    timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 5 * 60 * 1000),
+  },
+
+  /** Everything the Hugging Face Space provider needs. Ignored by the others. */
+  huggingface: {
+    // The Space's address, e.g. https://tencent-hunyuan3d-2.hf.space
+    space: process.env.HF_SPACE_URL || '',
+
+    // Optional. A public Space needs no token; a private or gated one does, and
+    // a token also lifts the anonymous rate limit on a busy afternoon.
+    token: process.env.HF_TOKEN || '',
+
+    // Optional. Which named endpoint to call, e.g. /generation_all. Left unset,
+    // the provider reads the Space's own API schema and picks the endpoint that
+    // takes an image and returns a model, which is right on every Space tried.
+    api: process.env.HF_SPACE_API || '',
+
+    // Shared with Replicate, because it is the same question: how long to give
+    // a queue before letting go. Nobody is waiting on it either way.
     timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 5 * 60 * 1000),
   },
 
