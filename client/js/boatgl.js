@@ -128,6 +128,40 @@ export class BoatGL {
   }
 
   /**
+   * Gets a model ready without showing it.
+   *
+   * Rigs it and compiles its shaders now, while it is still only an
+   * announcement, rather than at the moment it goes on the wall. Measured: the
+   * first frame of a model cost 35ms against 0.4ms for every frame after it -
+   * a stutter, and precisely at the moment somebody is looking at the swap.
+   */
+  warm(scene) {
+    if (!scene) return;
+
+    this.pivot.add(scene);
+    rig(scene);
+
+    try {
+      this.renderer.compile(this.scene, this.camera);
+
+      // ...and then actually draw it once, into a canvas nobody is looking at.
+      //
+      // Compiling the shaders is not the expensive part. Measured, the first
+      // render of a model costs about 35ms and every one after it costs 0.4ms -
+      // the driver uploading textures and setting up buffers on first use, none
+      // of which compile() does. Spending it here, while the model is still an
+      // announcement, is the difference between a stutter as the boat changes
+      // and no stutter at all.
+      this.renderer.render(this.scene, this.camera);
+    } catch (err) {
+      // Nothing to do about it here; showing it will simply pay the cost.
+      console.warn('[glb] could not warm the model up:', err.message);
+    }
+
+    this.pivot.remove(scene);
+  }
+
+  /**
    * Rides the water.
    *
    * The stage has already worked out what the surface is doing under the hull -

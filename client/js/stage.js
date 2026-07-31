@@ -217,13 +217,25 @@ export class Stage {
     }
   }
 
-  /** Fetches and parses a model now, so showing it later costs nothing. */
+  /**
+   * Fetches, parses, rigs and compiles a model now, so showing it later costs
+   * nothing.
+   *
+   * All of it - including making the WebGL context, which is not cheap either -
+   * happens while the model is still only an announcement. By the time it goes
+   * on the wall there is nothing left to do but draw it.
+   */
   async preloadModel(url) {
     if (!url || !GLB.enabled) return;
 
     try {
-      const { preload } = await boatgl();
-      await preload(url);
+      const { BoatGL, preload } = await boatgl();
+
+      const scene = await preload(url);
+      if (!scene) return;
+
+      if (!this.gl) this.gl = BoatGL.create();
+      if (this.gl) this.gl.warm(scene);
     } catch (err) {
       console.warn('[stage] could not preload the model:', err.message);
     }

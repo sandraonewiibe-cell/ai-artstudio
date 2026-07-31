@@ -291,16 +291,26 @@ function patch(mesh, model, uniforms) {
 
   const localFromBoat = new THREE.Matrix4().copy(boatFromLocal).invert();
 
-  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-  let done = 0;
+  const shared = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const own = shared.filter(Boolean).map((material) => {
+    /**
+     * One material per mesh, even where the file shares them.
+     *
+     * The displacement is worked out in the boat's frame, and the matrices that
+     * get there are different for every mesh. A material shared between the
+     * hull and the oars can only hold one pair of them, so whichever mesh was
+     * patched first would impose its own frame on all the others and the oars
+     * would sweep from the wrong place - which is exactly what a generated boat
+     * does, because an exporter gives the whole model one material.
+     *
+     * Cloning shares the textures, so this costs a material rather than a copy
+     * of the visitor's drawing, and the program is shared too because the cache
+     * key below is the same for all of them.
+     */
+    const mine = material.userData.boatRigged ? material.clone() : material;
+    mine.userData.boatRigged = true;
 
-  materials.filter(Boolean).forEach((material) => {
-    // Already ours - a material shared between two meshes must not be patched
-    // twice, or the second mesh's matrices would win for both.
-    if (material.userData.boatRigged) return;
-    material.userData.boatRigged = true;
-
-    material.onBeforeCompile = (shader) => {
+    mine.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms, {
         uBoatFromLocal: { value: boatFromLocal },
         uLocalFromBoat: { value: localFromBoat },
@@ -313,11 +323,14 @@ function patch(mesh, model, uniforms) {
 
     // Without this, three reuses a compiled program from an unpatched material
     // with the same settings and none of the above ever runs.
-    material.customProgramCacheKey = () => 'ai-art-studio/rowing';
-    material.needsUpdate = true;
+    mine.customProgramCacheKey = () => 'ai-art-studio/rowing';
+    mine.needsUpdate = true;
 
-    done = 1;
+    return mine;
   });
 
-  return done;
+  if (!own.length) return 0;
+
+  mesh.material = Array.isArray(mesh.material) ? own : own[0];
+  return 1;
 }
