@@ -27,6 +27,20 @@
       <p class="link-detail" id="linkDetail">Reconnecting…</p>
     </div>
 
+    <!--
+      Three.js is served straight out of node_modules; this turns the bare
+      specifier its own add-ons use into a path a browser can fetch. No build
+      step, no bundle - the same arrangement as the rest of this client.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/three.module.min.js",
+          "three/addons/": "/vendor/three-addons/"
+        }
+      }
+    </script>
+
     <script type="module" src="display.js"></script>
   </body>
 </html>

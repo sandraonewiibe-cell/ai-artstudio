@@ -95,6 +95,20 @@ app.get('/admin', (req, res) => {
 
 app.use(express.static(config.paths.client));
 
+/**
+ * Three.js, straight out of node_modules.
+ *
+ * There is no build step here and there is not going to be one - the point of
+ * this project is that the client is files a browser can read. An import map on
+ * the display page turns the bare `three` specifier into these two folders, so
+ * the library is used exactly as it ships and upgrading it is npm's business.
+ *
+ * Only the display screen asks for any of it.
+ */
+const THREE_ROOT = path.join(config.paths.root, 'node_modules', 'three');
+app.use('/vendor/three', express.static(path.join(THREE_ROOT, 'build')));
+app.use('/vendor/three-addons', express.static(path.join(THREE_ROOT, 'examples', 'jsm')));
+
 // Static asset / output folders
 app.use('/assets', express.static(config.paths.assets));
 app.use('/uploads', express.static(config.paths.uploads));

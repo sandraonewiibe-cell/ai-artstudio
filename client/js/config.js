@@ -473,6 +473,61 @@ export const MODEL3D = {
  * Tune the numbers below to match whatever footage is in use; the eye accepts
  * an approximation readily as long as the motion is unhurried and irregular.
  */
+/**
+ * Showing the model the 3D pipeline made, when there is one.
+ *
+ * The server generates a GLB from the visitor's whole sketch and tells the wall
+ * about it separately from the boat, because a model takes far longer than a
+ * visitor will stand there. So the flat boat always sails; if a model turns up -
+ * for this crossing or a later one - it takes over.
+ *
+ * Nothing here changes what the flat boat does. If WebGL is unavailable, if the
+ * file will not parse, or if no model was ever made, the wall runs the 2D
+ * pipeline exactly as it always has.
+ */
+export const GLB = {
+  enabled: true,
+
+  // The model is rendered to its own square canvas and composited into the
+  // stage, so the recording still catches everything in one picture. Bigger
+  // costs fill rate for detail nobody at the back of a hall will see.
+  size: 1024,
+
+  // How much room that canvas is given on the wall, relative to the boat's flat
+  // footprint. Generous: a rotated model's corners reach past where the flat
+  // image sat.
+  cover: 2.0,
+
+  fieldOfView: 30,
+  distance: 3.2,
+
+  // Turned slightly off square, so the depth is actually visible. Straight-on,
+  // a model and a flat image look the same.
+  baseYaw: 0.5,
+
+  // Riding the water. The wave field already works out how far the surface has
+  // lifted and how it is sloping under the hull; these say how much of that the
+  // model takes as heave and as roll.
+  heave: 0.55,
+  roll: 1,
+
+  // A slow nod on top, so it is never rigid.
+  nodDegrees: 3,
+  nodPeriodMs: 7300,
+
+  // Lighting. The environment does the reflections; the sun gives it a
+  // direction to be lit from.
+  exposure: 1.05,
+  envIntensity: 0.85,
+  sunIntensity: 1.7,
+  sun: [3, 5, 2],
+
+  // Mirrored under the hull, the same cue the flat boat uses. It is the same
+  // rendered frame drawn again upside down, so it costs one blit rather than a
+  // second pass over the model.
+  reflection: { opacity: 0.2, squash: 0.42 },
+};
+
 export const WAVES = {
   // Two overlapping swells. Different lengths and speeds stop the surface
   // looking like a metronome.

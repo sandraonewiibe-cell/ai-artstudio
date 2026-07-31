@@ -35,6 +35,9 @@ stage.overlay = overlay;
 let busy = false;
 const queue = [];
 
+/** Whose boat is on the wall, so a model arriving late can find its crossing. */
+let playing = null;
+
 function showNotice(visible, detail) {
   link.hidden = !visible;
   if (detail) linkDetail.textContent = detail;
@@ -45,9 +48,17 @@ const RECORD_MS = Math.min(DISPLAY.recordMs, DISPLAY.holdMs);
 
 async function play(job) {
   busy = true;
+  playing = job;
 
   try {
     await stage.show(job);
+
+    // If a model was already made for this drawing - a rescan, or a crossing
+    // that came round again - it is already parsed and goes up with the boat
+    // rather than after it.
+    if (job.model && job.model.status === 'ready') {
+      await stage.sculpt(job.model.url);
+    }
 
     const recording = recorder.start();
     if (!recording) console.warn('[display] continuing without a recording');
@@ -67,8 +78,29 @@ async function play(job) {
     if (recorder.recording) await recorder.stop();
   } finally {
     busy = false;
+    playing = null;
     const next = queue.shift();
     if (next) play(next);
+  }
+}
+
+/**
+ * A model finished on the server.
+ *
+ * It is loaded whatever is happening, so it is parsed and on the GPU before it
+ * is ever needed. If it belongs to the boat currently crossing, it takes over
+ * mid-flight - which is the usual case, because a model takes longer to make
+ * than a visitor will stand and watch.
+ */
+async function modelArrived(id, model) {
+  if (!model || model.status !== 'ready' || !model.url) return;
+
+  // Parsed and on the GPU straight away, whether or not it is wanted yet.
+  await stage.preloadModel(model.url);
+
+  if (playing && playing.id === id) {
+    const shown = await stage.sculpt(model.url);
+    if (shown) console.log(`[display] ${id.slice(0, 8)} is now the generated model`);
   }
 }
 
@@ -127,6 +159,12 @@ connect(
     if (event.type === 'settings' && event.settings) {
       applyBackground(event.settings);
       overlay.apply(event.settings);
+      return;
+    }
+
+    // A generated model, which arrives on its own after the boat it belongs to.
+    if (event.type === 'model' && event.id) {
+      modelArrived(event.id, event.model);
       return;
     }
 

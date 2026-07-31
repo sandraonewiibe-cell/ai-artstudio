@@ -18,7 +18,8 @@
   "dependencies": {
     "express": "^4.19.2",
     "qrcode": "^1.5.4",
-    "tesseract.js": "^5.1.1"
+    "tesseract.js": "^5.1.1",
+    "three": "^0.185.1"
   },
   "engines": {
     "node": ">=18"
