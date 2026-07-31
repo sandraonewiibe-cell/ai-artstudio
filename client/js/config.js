@@ -484,12 +484,32 @@ export const MODEL3D = {
 
   fieldOfView: 32,
   distance: 3.1,
-  scale: 1.35,
 
-  // How much room the model's canvas is given on screen, relative to the boat's
-  // flat footprint. Needs slack: rotation and perspective push the corners out
-  // beyond where the flat image sat.
-  canvasCover: 1.9,
+  /**
+   * How much of its own canvas the boat fills.
+   *
+   * The mesh spans two units on its longer edge, and at this field of view and
+   * distance the camera sees about 1.8 - so anything above about 0.9 runs off
+   * the edge of the canvas and is cut off. It was 1.35, which drew the boat
+   * half as big again as the frame it was being drawn into; the top of the
+   * hull was simply missing. That went unnoticed because the renderer had
+   * never drawn anything at all until the index fix.
+   *
+   * 0.7 leaves the boat comfortably inside its frame with room for the roll,
+   * the yaw and the nod to swing the corners out without clipping.
+   */
+  scale: 0.7,
+
+  /**
+   * How much room the model's canvas is given on screen, relative to the flat
+   * boat's footprint.
+   *
+   * This and `scale` multiply: the boat fills about 72% of its canvas, so the
+   * canvas is drawn 1.4 times the flat boat's width to put the boat itself at
+   * very nearly the same size the flat one was. Measured at 1.01x - which is
+   * what "the same boat, with depth" should mean.
+   */
+  canvasCover: 1.4,
 
   // A slow nod on top of the wave's roll, so the boat is never rigid.
   nodDegrees: 3.5,
