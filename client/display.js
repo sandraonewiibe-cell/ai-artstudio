@@ -21,13 +21,15 @@ const linkDetail = document.getElementById('linkDetail');
 const stage = new Stage(canvas, backgroundSource);
 const recorder = new Recorder(canvas, { fps: 30 });
 
-// The organiser's logos and advertisements, in front of the canvas rather than
-// painted into it - so they are never in the clip the visitor takes home, and
-// the boat's own drawing code is untouched by any of it.
+// The organiser's logos and advertisements. The overlay keeps the schedule and
+// holds the pictures off-screen; the stage paints them into the canvas, which
+// is what puts them into the recording the visitor scans for as well as onto
+// the wall.
 //
 // The rotation runs on its own clock and pays no attention to what the wall is
 // doing, so advertisements keep their turn whether or not a boat is crossing.
 const overlay = createOverlay();
+stage.overlay = overlay;
 
 /** One session at a time; a result arriving mid-playback waits its turn. */
 let busy = false;

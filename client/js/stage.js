@@ -35,6 +35,19 @@ const MOTION = {
   waterlineY: 0.52,
 };
 
+/**
+ * Where the organiser's things sit, as fractions of the wall.
+ *
+ * These are the numbers the stylesheet used when logos and advertisements were
+ * laid over the canvas rather than painted into it, so the wall looks as it did
+ * - only now the recording looks the same way too.
+ */
+const OVERLAY = {
+  marginRatio: 0.03,   // logos, in from the top and the side
+  stripRatio: 0.22,    // how much of the wall a strip advertisement takes
+  featherStart: 0.62,  // where its inner edge starts fading out
+};
+
 const RIPPLE = {
   count: 3,
   periodMs: 3800,
@@ -62,6 +75,18 @@ export class Stage {
     this.startedAt = 0;
     this.lastFrameAt = 0;
     this.running = false;
+
+    /**
+     * Logos and advertisements, if the display has set any up.
+     *
+     * Painted into this canvas rather than laid over it, so what the visitor
+     * downloads is what was on the wall - the same logos, the same
+     * advertisement, at the same moment.
+     */
+    this.overlay = null;
+
+    /** Scratch canvas for feathering an advertisement's edge. Built on demand. */
+    this.adBuffer = null;
 
     // Built once and reused. Creating a WebGL context per visitor would leak
     // contexts until the browser started refusing them.
@@ -175,8 +200,17 @@ export class Stage {
 
     this.drawBackground(w, h);
 
-    if (!this.boat) return;
+    if (this.boat) this.drawScene(now, w, h);
 
+    // Last, so it sits over everything - and *into* the canvas rather than in
+    // front of it, which is what puts the logos and advertisements into the
+    // recording as well as on the wall. Outside the boat's branch, so they are
+    // there between visitors too.
+    if (this.overlay) this.drawOverlay(now, w, h);
+  }
+
+  /** The boat and its water. Only runs when there is one. */
+  drawScene(now, w, h) {
     const elapsed = now - this.startedAt;
     const progress = Math.max(0, Math.min(1, elapsed / DISPLAY.holdMs));
 
@@ -504,6 +538,93 @@ export class Stage {
     ctx.restore();
   }
 
+  /**
+   * The organiser's logos and advertisement, painted onto the wall.
+   *
+   * The overlay decides *what* is showing and how far through its fade it is;
+   * this only puts it on the canvas. Keeping the two apart means the schedule
+   * is not tangled up in the drawing, and keeping the drawing here means there
+   * is one picture rather than two - the wall and the recording cannot drift
+   * apart, because they are the same pixels.
+   */
+  drawOverlay(now, w, h) {
+    const frame = this.overlay.frame(now);
+    if (!frame) return;
+
+    if (frame.ad) this.drawAd(frame.ad, w, h);
+
+    // Logos over the advertisement: they are the venue's, and a full-screen
+    // advertisement should not be able to cover them.
+    frame.logos.forEach((logo) => this.drawLogo(logo, w, h));
+  }
+
+  drawLogo({ side, image, size }, w, h) {
+    const height = (h * size) / 100;
+    const width = (image.naturalWidth / image.naturalHeight) * height;
+    if (!Number.isFinite(width) || width <= 0) return;
+
+    const margin = h * OVERLAY.marginRatio;
+    const x = side === 'left' ? margin : w - margin - width;
+
+    this.ctx.drawImage(image, x, margin, width, height);
+  }
+
+  drawAd({ media, placement, opacity }, w, h) {
+    const { ctx } = this;
+
+    const [rx, ry, rw, rh] = adRect(placement, w, h);
+    if (rw < 2 || rh < 2) return;
+
+    const mw = media.videoWidth || media.naturalWidth;
+    const mh = media.videoHeight || media.naturalHeight;
+    if (!mw || !mh) return;
+
+    // Fitted inside its area whole, never cropped - the same as the panel's
+    // preview and the same as `object-fit: contain` did before.
+    const fit = Math.min(rw / mw, rh / mh);
+    const dw = mw * fit;
+    const dh = mh * fit;
+    const dx = (rw - dw) / 2;
+    const dy = (rh - dh) / 2;
+
+    const buffer = this.bufferFor(rw, rh);
+    const bctx = buffer.getContext('2d');
+
+    bctx.clearRect(0, 0, rw, rh);
+    bctx.drawImage(media, dx, dy, dw, dh);
+
+    // The edge that faces into the scene is faded out, so the advertisement
+    // melts into the water instead of ending on a straight line. A full-screen
+    // one has no such edge - all four sit on the border of the wall.
+    const feather = featherFor(placement, bctx, rw, rh);
+    if (feather) {
+      bctx.save();
+      bctx.globalCompositeOperation = 'destination-out';
+      bctx.fillStyle = feather;
+      bctx.fillRect(0, 0, rw, rh);
+      bctx.restore();
+    }
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+    ctx.drawImage(buffer, rx, ry);
+    ctx.restore();
+  }
+
+  /** Reused between frames; only rebuilt when the area changes size. */
+  bufferFor(width, height) {
+    const w = Math.ceil(width);
+    const h = Math.ceil(height);
+
+    if (!this.adBuffer || this.adBuffer.width !== w || this.adBuffer.height !== h) {
+      this.adBuffer = document.createElement('canvas');
+      this.adBuffer.width = w;
+      this.adBuffer.height = h;
+    }
+
+    return this.adBuffer;
+  }
+
   /** The detected name, centred below the boat. */
   drawName(w, h) {
     const { ctx } = this;
@@ -530,6 +651,44 @@ export class Stage {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+/** The area an advertisement occupies, by placement. */
+function adRect(placement, w, h) {
+  const strip = OVERLAY.stripRatio;
+
+  switch (placement) {
+    case 'top': return [0, 0, w, h * strip];
+    case 'bottom': return [0, h * (1 - strip), w, h * strip];
+    case 'left': return [0, 0, w * strip, h];
+    case 'right': return [w * (1 - strip), 0, w * strip, h];
+    default: return [0, 0, w, h]; // fullscreen
+  }
+}
+
+/**
+ * A gradient that erases the edge facing into the scene, and nothing else.
+ *
+ * Used with `destination-out`, so opaque here means "rub this away". It runs
+ * from nothing at `featherStart` to fully gone at the inner edge; the other
+ * three edges of a strip lie along the border of the wall, where there is
+ * nothing to blend with.
+ */
+function featherFor(placement, ctx, w, h) {
+  const ends = {
+    top: [0, 0, 0, h],
+    bottom: [0, h, 0, 0],
+    left: [0, 0, w, 0],
+    right: [w, 0, 0, 0],
+  }[placement];
+
+  if (!ends) return null; // fullscreen
+
+  const gradient = ctx.createLinearGradient(...ends);
+  gradient.addColorStop(OVERLAY.featherStart, 'rgba(0, 0, 0, 0)');
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
+
+  return gradient;
 }
 
 /** Fractional part, always positive. */

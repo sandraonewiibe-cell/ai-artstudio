@@ -1,17 +1,19 @@
 /**
- * The organiser's logos and advertisements, over the top of the wall.
+ * The organiser's logos and advertisements.
  *
- * Deliberately not part of the canvas. The canvas is the boat, and it records
- * itself - anything drawn into it ends up in the clip the visitor takes home,
- * which is right for a boat and wrong for an advertisement. Keeping this in
- * front of the canvas as ordinary elements also means the boat's own drawing
- * code is not touched at all, so none of this can affect what the wall does
- * when nobody has configured anything.
+ * This module owns the *schedule* - which advertisement is up, for how long,
+ * and how far through its fade it is. It draws nothing. The pictures and videos
+ * it holds live off-screen, purely as something for the canvas to copy from,
+ * and the Stage paints them as part of the wall.
  *
- * Builds its own elements, so the page it sits on needs no markup for it.
+ * That is the whole point of the arrangement: the wall records itself, so
+ * anything laid *over* the canvas is missing from the clip the visitor takes
+ * home. Painting into the canvas instead means there is one picture, and the
+ * recording cannot show something different from the wall because it is the
+ * same pixels.
  */
 
-const AD_FADE_MS = 400;
+const FADE_MS = 400;
 
 /** How soon the first advertisement appears once the settings arrive. */
 const FIRST_SHOW_MS = 1500;
@@ -20,42 +22,55 @@ const FIRST_SHOW_MS = 1500;
 const READY_TIMEOUT_MS = 1500;
 
 export function createOverlay(parent = document.body) {
-  const root = document.createElement('div');
-  root.className = 'wall-overlay';
+  // Off-screen, but in the page: a video that is not in the document may not
+  // decode, and one that is `display: none` certainly will not.
+  const sources = document.createElement('div');
+  sources.className = 'offscreen-source';
+  parent.appendChild(sources);
 
   const logos = {
-    left: logoElement('left'),
-    right: logoElement('right'),
+    left: { node: logoElement(), size: 10, enabled: false },
+    right: { node: logoElement(), size: 10, enabled: false },
   };
+  sources.append(logos.left.node, logos.right.node);
 
-  const ad = document.createElement('div');
-  ad.className = 'wall-ad';
-  ad.hidden = true;
+  /** The advertisement currently on the wall, if any. */
+  let media = null;
+  let placement = 'bottom';
 
-  root.append(logos.left, logos.right, ad);
-  parent.appendChild(root);
+  /** The fade, as two ends and a start time - there is no CSS to do it here. */
+  let fade = { from: 0, to: 0, at: 0 };
 
-  /** The next thing the rotation will do, and the teardown after a fade. */
   let turn = null;
   let teardown = null;
-
   let next = 0;
   let config = null;
+
+  const now = () => performance.now();
+
+  function opacity(at) {
+    const progress = Math.min(1, Math.max(0, (at - fade.at) / FADE_MS));
+    return fade.from + (fade.to - fade.from) * progress;
+  }
+
+  function fadeTo(to) {
+    fade = { from: opacity(now()), to, at: now() };
+  }
 
   function applyLogos(settings) {
     ['left', 'right'].forEach((side) => {
       const wanted = settings.logos[side];
-      const node = logos[side];
+      const logo = logos[side];
 
-      if (!wanted.enabled || !wanted.url) {
-        node.hidden = true;
-        node.removeAttribute('src');
+      logo.enabled = Boolean(wanted.enabled && wanted.url);
+      logo.size = wanted.size;
+
+      if (!logo.enabled) {
+        logo.node.removeAttribute('src');
         return;
       }
 
-      if (node.getAttribute('src') !== wanted.url) node.src = wanted.url;
-      node.style.height = `${wanted.size}vh`;
-      node.hidden = false;
+      if (logo.node.getAttribute('src') !== wanted.url) logo.node.src = wanted.url;
     });
   }
 
@@ -68,32 +83,23 @@ export function createOverlay(parent = document.body) {
     teardown = null;
   }
 
-  /** Empties the frame, stopping any video first. */
-  function clearMedia() {
-    const media = ad.firstElementChild;
-
-    // A video that is torn out of the page while it is still decoding can
-    // flash as its layer goes. Stopped and unhooked first, it goes quietly.
+  function drop() {
     if (media && media.tagName === 'VIDEO') {
       media.pause();
       media.removeAttribute('src');
       media.load();
     }
 
-    ad.replaceChildren();
+    if (media && media.parentNode) media.parentNode.removeChild(media);
+    media = null;
   }
 
   function hide() {
-    ad.classList.remove('is-visible');
+    fadeTo(0);
 
-    // Held in the page for the length of the fade, then emptied and taken out
-    // of the compositor entirely - an element left behind is one that can
-    // still show something.
+    // Kept as a source for the length of the fade, then let go.
     window.clearTimeout(teardown);
-    teardown = window.setTimeout(() => {
-      clearMedia();
-      ad.hidden = true;
-    }, AD_FADE_MS);
+    teardown = window.setTimeout(drop, FADE_MS);
   }
 
   async function show() {
@@ -102,27 +108,22 @@ export function createOverlay(parent = document.body) {
     const item = config.ads.items[next % config.ads.items.length];
     next += 1;
 
-    // Cancel any pending teardown before touching the frame, or it will empty
-    // the advertisement that is being put into it.
     window.clearTimeout(teardown);
+    drop();
 
-    const media = build(item);
-    clearMedia();
-    ad.replaceChildren(media);
-    ad.hidden = false;
+    const element = build(item);
+    sources.appendChild(element);
+    media = element;
 
-    // Faded in only once there is actually a frame to show. Fading in an
-    // empty element and letting it fill afterwards is the flash of light that
-    // used to appear around an advertisement.
-    await hasFrame(media);
+    // Only faded up once there is a frame to show. Fading in an empty element
+    // and letting it fill afterwards is the flash of light that used to appear.
+    await hasFrame(element);
 
     // The settings may have changed while that was loading.
-    if (!running() || ad.firstElementChild !== media) return;
+    if (!running() || media !== element) return;
 
-    ad.classList.add('is-visible');
-
-    const duration = config.ads.durationSec * 1000;
-    turn = window.setTimeout(rest, duration);
+    fadeTo(1);
+    turn = window.setTimeout(rest, config.ads.durationSec * 1000);
   }
 
   /**
@@ -140,9 +141,9 @@ export function createOverlay(parent = document.body) {
     stop();
     hide();
 
-    // Back to the top of the list. The panel numbers the advertisements and
-    // says they play in that order, so after a save they should start at the
-    // first one rather than wherever the previous list happened to have got to.
+    // Back to the top of the list. The panel numbers the advertisements, so
+    // after a save they should start at the first one rather than wherever the
+    // previous list had got to.
     next = 0;
 
     if (!running()) return;
@@ -158,7 +159,7 @@ export function createOverlay(parent = document.body) {
       config = settings;
 
       applyLogos(settings);
-      ad.dataset.placement = settings.ads.placement;
+      placement = settings.ads.placement;
 
       // Only restart the rotation when its shape actually changed; otherwise a
       // save that only moved a logo would cut an advertisement off mid-show.
@@ -168,6 +169,26 @@ export function createOverlay(parent = document.body) {
           : '';
 
       if (key(before) !== key(settings)) restart();
+    },
+
+    /**
+     * What should be on the wall at this instant, for the Stage to paint.
+     *
+     * Anything without a frame yet is left out rather than drawn as a gap.
+     */
+    frame(at) {
+      const alpha = opacity(at);
+
+      return {
+        logos: ['left', 'right']
+          .filter((side) => logos[side].enabled && logos[side].node.naturalWidth > 0)
+          .map((side) => ({ side, image: logos[side].node, size: logos[side].size })),
+
+        ad:
+          media && alpha > 0.01 && hasPixels(media)
+            ? { media, placement, opacity: alpha }
+            : null,
+      };
     },
   };
 }
@@ -184,6 +205,12 @@ function build(item) {
     muted: true,
     playsInline: true,
   });
+}
+
+function hasPixels(media) {
+  return media.tagName === 'VIDEO'
+    ? media.readyState >= 2 && media.videoWidth > 0
+    : media.naturalWidth > 0;
 }
 
 /**
@@ -205,10 +232,7 @@ function hasFrame(media) {
 
     const bail = window.setTimeout(done, READY_TIMEOUT_MS);
 
-    const ready =
-      media.tagName === 'VIDEO' ? media.readyState >= 2 : media.complete && media.naturalWidth > 0;
-
-    if (ready) return done();
+    if (hasPixels(media)) return done();
 
     media.addEventListener(media.tagName === 'VIDEO' ? 'loadeddata' : 'load', done, { once: true });
     media.addEventListener('error', done, { once: true });
@@ -217,10 +241,8 @@ function hasFrame(media) {
   });
 }
 
-function logoElement(side) {
+function logoElement() {
   const node = document.createElement('img');
-  node.className = `wall-logo is-${side}`;
   node.alt = '';
-  node.hidden = true;
   return node;
 }
