@@ -172,7 +172,19 @@ export const EXTRACT = {
     // An enclosed pixel with this much colour in it is the visitor's own
     // shading and is kept as-is. Chroma rather than brightness, because a pale
     // yellow crayon and white paper are almost the same brightness.
-    chromaThreshold: 22,
+    //
+    // Set to catch a light pencil fill, not just a heavy crayon one. This is
+    // also the line between "coloured in" and "drawn in pencil", and a setting
+    // that sits just above a fill is worse than one well above it: only the few
+    // darkest pixels of the shading clear the bar, they alone form the area, and
+    // their average - dragged dark by the outline they hug - is then painted
+    // across the whole of it. A light green hull came out slate that way. Low
+    // enough that the whole fill joins its own area, and the colour that gets
+    // spread is the colour the child actually used.
+    //
+    // Graphite has a chroma of about 6, so an outline and handwriting stay ink
+    // at this setting; measured across every value from 22 down to 6.
+    chromaThreshold: 12,
 
     // ...as is anything this much darker than the paper around it, which
     // catches a grey wash too faint to count as ink.
