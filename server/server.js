@@ -261,6 +261,29 @@ app.post('/api/media', adminLimit, adminOnly, mediaBody, (req, res) => {
   }
 });
 
+/**
+ * The 3D stage, and whether it can actually run.
+ *
+ * Says more than its name on purpose. A provider that is loaded but has no
+ * credential looks identical to one that is working right up until the moment a
+ * visitor's boat quietly fails to become a model, and the first place anyone
+ * looks is this line.
+ */
+function describe3D() {
+  const name = pipeline.info.model3d;
+  if (name === 'none') return 'none (2D only)';
+
+  if (name === 'replicate') {
+    const { token, model, version } = config.replicate;
+    const which = version ? `version ${version.slice(0, 8)}` : model;
+    return token
+      ? `${name} - ${which} - token present, ready`
+      : `${name} - ${which} - NO TOKEN, so nothing will be generated`;
+  }
+
+  return name;
+}
+
 function describeLogos(saved) {
   const on = ['left', 'right'].filter((side) => saved.logos[side].enabled);
   return on.length ? on.join(' + ') : 'off';
@@ -328,6 +351,8 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`  image provider: ${pipeline.info.provider}`);
   console.log(`  ocr engine:     ${pipeline.info.ocr}`);
   console.log(`  classifier:     ${pipeline.info.classifier}`);
+  console.log(`  sketch enhancer:${pipeline.info.enhancer}`);
+  console.log(`  3D provider:    ${describe3D()}`);
 
   // The QR code carries the first of these. If a phone cannot reach it, it is
   // on one of the others - set PUBLIC_HOST to whichever matches the network the
