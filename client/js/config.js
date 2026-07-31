@@ -423,10 +423,20 @@ export const PADDLES = {
  * happens anyway on a machine without WebGL.
  */
 export const MODEL3D = {
-  // Off by default. The flat wave-warped boat is the version that has been seen
-  // working on the wall; this is the experimental one. Turn it on to try it, but
-  // note the two things it gives up, below.
-  enabled: false,
+  /**
+   * On. This is the free path: the boat is built in the browser, from the
+   * drawing, on the machine in the room.
+   *
+   * Nothing is sent anywhere and nothing is generated. The mesh comes from the
+   * silhouette the visitor drew and is skinned with their own drawing, so the
+   * colours, the handwriting and the outline are not preserved so much as
+   * simply never replaced. No account, no key, no network, no per-boat cost,
+   * and no queue between a visitor and their boat.
+   *
+   * What it gives up against an image-to-3D model is understanding: it knows
+   * the shape of the drawing, not that a hull is hollow or a mast is thin.
+   */
+  enabled: true,
 
   // The silhouette is analysed at this width. Detail beyond it changes the
   // height field very little and costs time on every visitor.
@@ -442,6 +452,31 @@ export const MODEL3D = {
   // Curve of the bulge. Below 1 rounds off quickly at the edge and flattens
   // across the middle, which reads as a hull rather than a cone.
   profile: 0.65,
+
+  /**
+   * Shaping the inflated form into something more like a boat.
+   *
+   * Inflation on its own gives a cushion: an even bulge, as full at the bow as
+   * amidships. These three numbers only ever change how *deep* the surface is -
+   * never the outline - so the boat on screen is still exactly the shape that
+   * was drawn, with the silhouette coming from the drawing's own alpha.
+   *
+   * All three at 0 gives the plain inflation this had before.
+   */
+  hull: {
+    // How much the bow and stern draw in. The ends thin towards a point while
+    // amidships keeps its full depth, which is the difference between a boat
+    // and a lozenge.
+    taper: 0.6,
+
+    // How much fuller the underside is than the sheer. A hull carries its
+    // volume low; a cushion carries it in the middle.
+    fullness: 0.35,
+
+    // Passes of smoothing over the depth. Takes the facets off the ends, where
+    // the taper is steepest. Each pass costs about a millisecond.
+    smooth: 2,
+  },
 
   // Turned slightly off square, so the depth is actually visible. Straight-on,
   // a 3D model and a flat image look identical.

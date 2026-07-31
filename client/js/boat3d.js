@@ -124,6 +124,20 @@ export class Boat3D {
     this.texture = gl.createTexture();
     this.mesh = null;
 
+    /**
+     * Whether this context will accept 32-bit indices.
+     *
+     * WebGL1 will not, unless asked. Without this line the mesh uploads, the
+     * draw call is made, no error is reported and nothing whatsoever appears -
+     * which is exactly how this renderer behaved, and why it sat switched off.
+     *
+     * Where the extension is missing the indices are narrowed to 16-bit, which
+     * every context supports and which is wide enough for any mesh this grid
+     * produces.
+     */
+    this.wideIndices = Boolean(gl.getExtension('OES_element_index_uint'));
+    this.indexType = this.wideIndices ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -150,6 +164,7 @@ export class Boat3D {
 
     const field = buildHeightField(ctx.getImageData(0, 0, reader.width, reader.height), {
       profile: MODEL3D.profile,
+      hull: MODEL3D.hull,
     });
 
     if (!field.peak) return false;
@@ -166,8 +181,19 @@ export class Boat3D {
     upload(gl, this.buffers.normal, mesh.normals);
     upload(gl, this.buffers.uv, mesh.uvs);
 
+    // Narrowed where the context cannot take 32-bit indices. A vertex count
+    // past what 16 bits can address would have to be refused rather than drawn
+    // wrongly, but the grid does not produce meshes near that size.
+    const vertices = mesh.positions.length / 3;
+    if (!this.wideIndices && vertices > 65535) {
+      console.warn(`[boat3d] ${vertices} vertices needs 32-bit indices, which this context lacks`);
+      return false;
+    }
+
+    const indices = this.wideIndices ? mesh.indices : new Uint16Array(mesh.indices);
+
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.buffers.index);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // The drawing itself is the skin, so the boat keeps exactly what was drawn.
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
@@ -229,7 +255,7 @@ export class Boat3D {
     gl.uniformMatrix4fv(this.uniforms.model, false, model);
     gl.uniformMatrix4fv(this.uniforms.projection, false, projection);
 
-    gl.drawElements(gl.TRIANGLES, mesh.indices.length, gl.UNSIGNED_INT, 0);
+    gl.drawElements(gl.TRIANGLES, mesh.indices.length, this.indexType, 0);
   }
 
   dispose() {

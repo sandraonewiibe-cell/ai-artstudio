@@ -47,7 +47,132 @@ export function buildHeightField(image, options = {}) {
     }
   }
 
-  return { width, height, mask, heights, peak };
+  const field = { width, height, mask, heights, peak };
+
+  return options.hull ? shapeHull(field, options.hull) : field;
+}
+
+/**
+ * Shapes the inflated form into something more like a boat.
+ *
+ * Inflation on its own gives a cushion. Every point bulges by how far it is
+ * from an edge, so a hull comes out as full at the bow as it is amidships, and
+ * the eye reads it as a lozenge with a drawing on it.
+ *
+ * Three things change that, and all three touch only the depth:
+ *
+ *   - the ends draw in, so the bow and stern come to a point rather than a wall;
+ *   - the underside carries more volume than the sheer, which is where a hull
+ *     keeps its bulk and a cushion does not;
+ *   - the result is smoothed, which takes the facets off the ends where the
+ *     taper is steepest.
+ *
+ * The mask is never touched. It cannot be: the silhouette on screen comes from
+ * the drawing's own alpha in the fragment shader, not from this geometry, so
+ * the outline stays exactly the one the visitor drew however the depth is
+ * shaped. That is the whole reason this is safe to do.
+ *
+ * @param {{width:number,height:number,mask:Uint8Array,heights:Float32Array,peak:number}} field
+ * @param {{taper?:number, fullness?:number, smooth?:number}} options
+ */
+export function shapeHull(field, options = {}) {
+  const taper = options.taper ?? 0;
+  const fullness = options.fullness ?? 0;
+  const smooth = Math.max(0, Math.round(options.smooth ?? 0));
+
+  if (!taper && !fullness && !smooth) return field;
+
+  const { width, height, mask, heights } = field;
+
+  const box = extentOf(mask, width, height);
+  if (!box) return field;
+
+  const spanX = Math.max(1, box.maxX - box.minX);
+  const spanY = Math.max(1, box.maxY - box.minY);
+
+  // A boat is longer than it is deep, so the longer side of what was drawn is
+  // its length and the shorter one is bow-to-keel.
+  const lengthwise = spanX >= spanY;
+
+  if (taper || fullness) {
+    for (let y = box.minY; y <= box.maxY; y += 1) {
+      for (let x = box.minX; x <= box.maxX; x += 1) {
+        const i = y * width + x;
+        if (!mask[i]) continue;
+
+        // -1 at one end of the boat, +1 at the other, 0 amidships.
+        const along = lengthwise
+          ? ((x - box.minX) / spanX) * 2 - 1
+          : ((y - box.minY) / spanY) * 2 - 1;
+
+        // 0 at the sheer, 1 at the keel. The image's y runs downwards and the
+        // mesh flips it, so the bottom of the picture is the bottom of the boat.
+        const across = lengthwise
+          ? (y - box.minY) / spanY
+          : (x - box.minX) / spanX;
+
+        // Squared, so the thinning is gentle amidships and quick at the ends -
+        // linear made the whole boat thin rather than pointing it.
+        const ends = 1 - taper * along * along;
+        const belly = 1 + fullness * (across - 0.5) * 2;
+
+        heights[i] = Math.max(0, heights[i] * ends * belly);
+      }
+    }
+  }
+
+  for (let pass = 0; pass < smooth; pass += 1) {
+    soften(heights, mask, width, height, box);
+  }
+
+  return field;
+}
+
+/** The drawing's own bounding box, so the shaping is relative to the boat. */
+function extentOf(mask, width, height) {
+  let minX = width;
+  let maxX = -1;
+  let minY = height;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!mask[y * width + x]) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  return maxX < minX ? null : { minX, maxX, minY, maxY };
+}
+
+/**
+ * One pass of smoothing over the depth.
+ *
+ * Averaged only across pixels that are on the drawing, so the edge of the
+ * shape is not dragged towards zero by the emptiness outside it.
+ */
+function soften(heights, mask, width, height, box) {
+  const before = Float32Array.from(heights);
+
+  for (let y = box.minY; y <= box.maxY; y += 1) {
+    for (let x = box.minX; x <= box.maxX; x += 1) {
+      const i = y * width + x;
+      if (!mask[i]) continue;
+
+      let sum = before[i];
+      let n = 1;
+
+      if (x > 0 && mask[i - 1]) { sum += before[i - 1]; n += 1; }
+      if (x < width - 1 && mask[i + 1]) { sum += before[i + 1]; n += 1; }
+      if (y > 0 && mask[i - width]) { sum += before[i - width]; n += 1; }
+      if (y < height - 1 && mask[i + width]) { sum += before[i + width]; n += 1; }
+
+      heights[i] = sum / n;
+    }
+  }
 }
 
 /**
