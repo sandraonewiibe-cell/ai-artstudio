@@ -109,7 +109,6 @@ function paintAds() {
   el('adPlacement').value = ads.placement;
   el('adDuration').value = ads.durationSec;
   el('adGap').value = ads.gapSec;
-  describeCycle();
 
   const full = ads.items.length >= maxAds;
   el('adCount').textContent = Number.isFinite(maxAds)
@@ -199,29 +198,6 @@ function collect() {
   settings.ads.gapSec = Number(el('adGap').value);
 
   return settings;
-}
-
-/**
- * Spells the cycle out in words.
- *
- * Two numbers a few fields apart do not obviously add up to a rhythm, and the
- * thing being configured here is a rhythm - so it is written out rather than
- * left to be worked out.
- */
-function describeCycle() {
-  const show = Number(el('adDuration').value) || 0;
-  const gap = Number(el('adGap').value) || 0;
-  const count = settings ? settings.ads.items.length : 0;
-
-  if (!show || !gap) {
-    el('adCycle').textContent = '';
-    return;
-  }
-
-  const each = count > 1 ? 'each advertisement' : 'the advertisement';
-  el('adCycle').textContent =
-    `Cycle: ${each} for ${show}s, then ${gap}s of clear wall, then round again` +
-    (count > 1 ? ` — ${count} in rotation, ${(show + gap) * count}s for a full round.` : '.');
 }
 
 // --- wiring ------------------------------------------------------------------
@@ -327,11 +303,6 @@ el('save').addEventListener('click', async () => {
   } catch (err) {
     show(err.message, 'error');
   }
-});
-
-// Keep the description in step as the numbers are typed, before any save.
-['adDuration', 'adGap'].forEach((id) => {
-  el(id).addEventListener('input', describeCycle);
 });
 
 el('reload').addEventListener('click', () => {
