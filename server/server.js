@@ -292,7 +292,7 @@ app.use((err, req, res, next) => {
 });
 
 // Make sure output folders exist before the first visitor.
-['uploads', 'images', 'videos', 'media', 'data'].forEach((kind) =>
+['uploads', 'images', 'videos', 'models', 'media', 'data'].forEach((kind) =>
   storage.ensureDir(config.paths[kind])
 );
 

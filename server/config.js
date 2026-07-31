@@ -130,6 +130,52 @@ module.exports = {
   classifier: process.env.CLASSIFIER || 'mock',
 
   /**
+   * The 3D pipeline: tidy the sketch, then turn it into a model.
+   *
+   * Both stages are swappable by name, the same way the image provider, the OCR
+   * engine and the classifier are. Neither is on the visitor's path - the boat
+   * reaches the wall first and a model, if one is being made, arrives after -
+   * so a slow or missing provider costs an animation, never a session.
+   */
+
+  // Which enhancer to load from server/enhancers/. 'passthrough' leaves the
+  // drawing exactly as extracted, which is the default and the safe answer.
+  enhancer: process.env.ENHANCER || 'passthrough',
+
+  // Which image-to-3D provider to load from server/models3d/. 'none' is off.
+  model3d: process.env.MODEL3D || 'none',
+
+  /** Everything the Replicate provider needs. Ignored by the others. */
+  replicate: {
+    token: process.env.REPLICATE_API_TOKEN || '',
+    base: process.env.REPLICATE_API_BASE || 'https://api.replicate.com/v1',
+
+    // An official model is addressed by name; a community one by version.
+    // Setting a version switches to the versioned endpoint.
+    model: process.env.MODEL3D_MODEL || 'tencent/hunyuan3d-2',
+    version: process.env.MODEL3D_VERSION || '',
+
+    pollMs: num(process.env.MODEL3D_POLL_MS, 2000),
+
+    // Generous, because nobody is waiting on it. Long enough for a queue on a
+    // busy afternoon, short enough that a wedged prediction is eventually let
+    // go rather than held forever.
+    timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 5 * 60 * 1000),
+  },
+
+  /**
+   * What to ask the model for.
+   *
+   * The face budget is asked for up front rather than trimmed afterwards: a
+   * mesh that arrives the right size costs nothing to optimise, and there is no
+   * geometry library on this server to decimate one that does not.
+   */
+  mesh: {
+    faces: num(process.env.MESH_FACES, 40000),
+    texture: process.env.MESH_TEXTURE !== 'false',
+  },
+
+  /**
    * Password for /admin, if there is to be one.
    *
    * Unset means the panel is open, which is right on a kiosk on a table with
@@ -148,6 +194,7 @@ module.exports = {
     uploads: path.join(ROOT, 'uploads'),
     images: path.join(ROOT, 'generated', 'images'),
     videos: path.join(ROOT, 'generated', 'videos'), // reserved for a later version
+    models: path.join(ROOT, 'generated', 'models'), // GLBs from the 3D pipeline
 
     // Logos and advertisements, and the settings that point at them. Both sit
     // outside the folders the retention sweep clears: a visitor's capture is a

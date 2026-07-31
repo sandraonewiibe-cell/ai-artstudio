@@ -52,7 +52,7 @@ function ensureDir(dir) {
  * Writes a buffer and returns both the absolute path and the URL the client
  * can fetch it from.
  *
- * @param {'uploads'|'images'|'videos'|'media'} kind
+ * @param {'uploads'|'images'|'videos'|'media'|'models'} kind
  * @param {string} filename
  * @param {Buffer} buffer
  */

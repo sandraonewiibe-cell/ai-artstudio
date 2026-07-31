@@ -4,12 +4,18 @@ const storage = require('./storage');
 const { loadProvider } = require('./providers');
 const { loadOcr } = require('./ocr');
 const { loadClassifier } = require('./classifier');
+const { loadEnhancer } = require('./enhancers');
+const { loadModel3D } = require('./models3d');
 const { assertResult } = require('./providers/base');
+const { assertEnhanced } = require('./enhancers/base');
+const { assertSculpted } = require('./models3d/base');
 const events = require('./events');
 
 const provider = loadProvider();
 const ocr = loadOcr();
 const classifier = loadClassifier();
+const enhancer = loadEnhancer();
+const model3d = loadModel3D();
 
 /** @type {Map<string, object>} */
 const jobs = new Map();
@@ -41,7 +47,94 @@ function serialize(job) {
     label: job.label,
     reason: job.reason,
     error: job.error,
+
+    // The 3D model, which arrives after the boat rather than with it.
+    model: job.model,
   };
+}
+
+/**
+ * The 3D pipeline, run after the visitor's boat is already on the wall.
+ *
+ * Deliberately not awaited by the session. An image-to-3D model takes tens of
+ * seconds and a kiosk queue does not have tens of seconds, so the flat boat
+ * sails on time and the model catches up - the wall is told separately when one
+ * is ready. Nothing here can delay, fail or interrupt a session.
+ *
+ * The drawing goes in whole. It is not cut into a hull and paddles, or a canopy,
+ * or anything else: one picture of what the visitor drew, one object back.
+ */
+async function sculpt(job, drawing) {
+  if (model3d.name === 'none') return;
+
+  job.model = { status: 'working', url: null, provider: model3d.name };
+
+  try {
+    // 1. Tidy the sketch, if anything is configured to. The default leaves it
+    //    exactly as extracted.
+    const enhanced = assertEnhanced(
+      await enhancer.enhance({ buffer: drawing, mime: 'image/png' }),
+      enhancer.name
+    );
+
+    // 2. The same drawing twice is the same model. Worth checking before a
+    //    minute of somebody else's GPU: a sheet rescanned because the first
+    //    attempt was missed is the common case at a kiosk.
+    const fingerprint = crypto.createHash('sha256').update(enhanced.buffer).digest('hex');
+    const known = models.get(fingerprint);
+
+    if (known) {
+      job.model = { status: 'ready', url: known, provider: model3d.name, cached: true };
+      console.log(`[3d] ${job.id.slice(0, 8)} matched a model already made`);
+      events.broadcast('model', { id: job.id, model: job.model });
+      return;
+    }
+
+    const started = Date.now();
+
+    const sculpted = assertSculpted(
+      await model3d.generate({
+        ...enhanced,
+        text: job.text,
+        faces: config.mesh.faces,
+        texture: config.mesh.texture,
+      }),
+      model3d.name
+    );
+
+    if (!sculpted) {
+      job.model = { status: 'off', url: null, provider: model3d.name };
+      return;
+    }
+
+    const saved = storage.save('models', `${job.prefix}-boat.${sculpted.ext}`, sculpted.buffer);
+    remember(fingerprint, saved.url);
+
+    job.model = { status: 'ready', url: saved.url, provider: model3d.name };
+
+    console.log(
+      `[3d] ${job.id.slice(0, 8)} modelled in ${Math.round((Date.now() - started) / 1000)}s ` +
+        `(${Math.round(sculpted.buffer.length / 1024)}KB)`
+    );
+
+    events.broadcast('model', { id: job.id, model: job.model });
+  } catch (err) {
+    // A model that never arrives costs an animation. The boat is already on the
+    // wall and the visitor already has their clip.
+    console.warn(`[3d] ${job.id.slice(0, 8)} produced no model:`, err.message);
+    job.model = { status: 'failed', url: null, provider: model3d.name, error: err.message };
+  }
+}
+
+/** Fingerprint of a drawing to the model it produced. */
+const models = new Map();
+const MODEL_CACHE = 200;
+
+function remember(fingerprint, url) {
+  models.set(fingerprint, url);
+
+  // Oldest out first; the Map keeps insertion order for us.
+  if (models.size > MODEL_CACHE) models.delete(models.keys().next().value);
 }
 
 async function run(job, paperBuffer, drawingBuffer, layers) {
@@ -50,6 +143,7 @@ async function run(job, paperBuffer, drawingBuffer, layers) {
   // 1. Keep the raw capture for later inspection / re-runs.
   job.stage = 'saving';
   const prefix = `${stamp()}-${job.id.slice(0, 8)}`;
+  job.prefix = prefix; // the 3D stage names its model after the same session
   storage.save('uploads', `${prefix}-page.png`, paperBuffer);
   if (drawingBuffer) storage.save('uploads', `${prefix}-drawing.png`, drawingBuffer);
 
@@ -167,6 +261,7 @@ function createSession(payload) {
     transparent: false,
     standIn: false,
     layers: null,
+    model: null,
     label: null,
     reason: null,
     error: null,
@@ -193,6 +288,11 @@ function createSession(payload) {
       // rejection or an error stays on the scanner where the visitor is.
       if (job.status === 'done') {
         events.broadcast('result', { job: serialize(job) });
+
+        // ...and only now, with the boat already on its way to the wall, start
+        // the 3D pipeline. Not awaited: the session is over, and whether a
+        // model turns up is nothing the visitor is kept waiting for.
+        sculpt(job, drawingBuffer || paperBuffer);
       }
     });
 
@@ -223,6 +323,12 @@ module.exports = {
   createSession,
   getJob,
   sweepJobs,
-  info: { provider: provider.name, ocr: ocr.name, classifier: classifier.name },
+  info: {
+    provider: provider.name,
+    ocr: ocr.name,
+    classifier: classifier.name,
+    enhancer: enhancer.name,
+    model3d: model3d.name,
+  },
   warmup: () => (ocr.warmup ? ocr.warmup() : Promise.resolve()),
 };
