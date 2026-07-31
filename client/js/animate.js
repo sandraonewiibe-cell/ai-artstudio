@@ -172,25 +172,36 @@ export function pose(rigging, { stroke, elapsed }) {
 function measure(model) {
   model.updateMatrixWorld(true);
 
-  const box = new THREE.Box3().setFromObject(model);
-  if (box.isEmpty()) return null;
-
   const points = sample(model);
-  if (!points.length) return null;
+  if (points.length < 12) return null;
+
+  /**
+   * Everything is measured in the model's own frame, which is the frame the
+   * shader works in - `uBoatFromLocal` puts vertices there.
+   *
+   * It used to take the extents off a Box3 instead, and a Box3 is in *world*
+   * space. frame() scales every model to a known size on the way in, so the two
+   * frames differ by that scale on anything that needed scaling, which is
+   * everything. A car 13 units long came back scaled to 1, and the waterline
+   * search then divided local heights of +-3.4 by a world height of 0.5, put
+   * every vertex in the top bin, and declared the waterline to be the roof.
+   */
+  const box = bounds(points);
+
+  const spanX = box.maxX - box.minX;
+  const spanZ = box.maxZ - box.minZ;
 
   const hullX = middleSpread(points, 0);
   const hullZ = middleSpread(points, 2);
   const lengthwiseX = hullX >= hullZ;
 
-  const size = box.getSize(new THREE.Vector3());
-
   const forward = lengthwiseX ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
   const side = lengthwiseX ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
 
-  // Measured off the whole model, not the trimmed hull: the sweep has to reach
-  // the actual tips of the actual oars.
-  const halfLength = Math.max(1e-4, (lengthwiseX ? size.x : size.z) / 2);
-  const halfWidth = Math.max(1e-4, (lengthwiseX ? size.z : size.x) / 2);
+  // Off the whole model, not the trimmed hull: the sweep has to reach the
+  // actual tips of the actual paddles.
+  const halfLength = Math.max(1e-4, (lengthwiseX ? spanX : spanZ) / 2);
+  const halfWidth = Math.max(1e-4, (lengthwiseX ? spanZ : spanX) / 2);
 
   return {
     forward,
@@ -199,8 +210,28 @@ function measure(model) {
     halfWidth,
     axis: lengthwiseX ? 'x' : 'z',
     hullLength: lengthwiseX ? hullX : hullZ,
-    waterline: widest(points, side, size.y, box.min.y),
+    waterline: widest(points, side, box.maxY - box.minY, box.minY),
   };
+}
+
+/** The extents of the sampled points, in the frame they were sampled in. */
+function bounds(points) {
+  const box = {
+    minX: Infinity, maxX: -Infinity,
+    minY: Infinity, maxY: -Infinity,
+    minZ: Infinity, maxZ: -Infinity,
+  };
+
+  for (let i = 0; i < points.length; i += 3) {
+    if (points[i] < box.minX) box.minX = points[i];
+    if (points[i] > box.maxX) box.maxX = points[i];
+    if (points[i + 1] < box.minY) box.minY = points[i + 1];
+    if (points[i + 1] > box.maxY) box.maxY = points[i + 1];
+    if (points[i + 2] < box.minZ) box.minZ = points[i + 2];
+    if (points[i + 2] > box.maxZ) box.maxZ = points[i + 2];
+  }
+
+  return box;
 }
 
 /**
