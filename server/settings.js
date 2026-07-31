@@ -24,6 +24,15 @@ const MAX_ADS = 12;
 
 function defaults() {
   return {
+    /**
+     * The video behind everything on the wall.
+     *
+     * null means the one that ships with the kiosk. Uploading replaces it;
+     * clearing it puts the original back, which is why the original is never
+     * overwritten on disk.
+     */
+    background: { url: null },
+
     logos: {
       left: { enabled: false, url: null, size: 10 },
       right: { enabled: false, url: null, size: 10 },
@@ -131,6 +140,7 @@ function clean(input) {
   const logos = patch.logos && typeof patch.logos === 'object' ? patch.logos : {};
 
   return {
+    background: { url: ownUrl(patch.background && patch.background.url) },
     logos: {
       left: cleanLogo(logos.left, base.logos.left),
       right: cleanLogo(logos.right, base.logos.right),

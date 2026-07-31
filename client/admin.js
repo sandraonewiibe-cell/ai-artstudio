@@ -20,6 +20,11 @@ let settings = null;
 /** How many advertisements the server will keep. Told to us on the first read. */
 let maxAds = Infinity;
 
+/** ...and the largest file it will take, so a big one is refused here first. */
+let maxUpload = Infinity;
+
+const megabytes = (n) => `${(n / (1024 * 1024)).toFixed(0)} MB`;
+
 // --- talking to the server ---------------------------------------------------
 
 function headers() {
@@ -54,6 +59,14 @@ async function send(url, options) {
 
 /** Reads a chosen file as a data URL and stores it, returning its URL. */
 async function upload(file, kind) {
+  // Checked here so an oversized file is refused in a sentence, rather than
+  // being read, encoded, sent and met with a 413 a minute later.
+  if (file.size > maxUpload) {
+    throw new Error(
+      `That file is ${megabytes(file.size)}. The most this kiosk takes is ${megabytes(maxUpload)}.`
+    );
+  }
+
   const data = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -179,7 +192,38 @@ function move(index, by, label) {
   return button;
 }
 
+function paintBackground() {
+  const preview = el('bgPreview');
+  preview.replaceChildren();
+
+  el('bgLimit').textContent = Number.isFinite(maxUpload) ? `(up to ${megabytes(maxUpload)})` : '';
+
+  if (!settings.background.url) {
+    preview.textContent = 'Using the video the kiosk came with.';
+    return;
+  }
+
+  const video = Object.assign(document.createElement('video'), {
+    src: settings.background.url,
+    muted: true,
+    loop: true,
+    autoplay: true,
+  });
+
+  const restore = document.createElement('button');
+  restore.className = 'danger';
+  restore.textContent = 'Back to the original';
+  restore.addEventListener('click', () => {
+    settings.background.url = null;
+    paintBackground();
+    show('Removed. Save to apply.');
+  });
+
+  preview.append(video, restore);
+}
+
 function paint() {
+  paintBackground();
   paintLogo('left');
   paintLogo('right');
   paintAds();
@@ -209,6 +253,9 @@ async function load() {
     // The server says how many advertisements it will keep; the panel stops
     // there rather than letting somebody upload past it and lose them on save.
     if (body.limits && Number.isFinite(body.limits.ads)) maxAds = body.limits.ads;
+    if (body.limits && Number.isFinite(body.limits.uploadBytes)) {
+      maxUpload = body.limits.uploadBytes;
+    }
 
     settings = body;
     paint();
@@ -217,6 +264,23 @@ async function load() {
     show(err.message, 'error');
   }
 }
+
+el('bgFile').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  show('Uploading…');
+  try {
+    const stored = await upload(file, 'background');
+    settings.background.url = stored.url;
+    paintBackground();
+    show('Uploaded. Save to apply.', 'good');
+  } catch (err) {
+    show(err.message, 'error');
+  } finally {
+    event.target.value = '';
+  }
+});
 
 ['left', 'right'].forEach((side) => {
   el(`${side}File`).addEventListener('change', async (event) => {

@@ -187,7 +187,10 @@ app.get('/api/recordings/latest', (req, res) => {
  * time it silently drops somebody's twelfth upload. Saving ignores it.
  */
 app.get('/api/settings', (req, res) => {
-  res.json({ ...settings.get(), limits: { ads: settings.MAX_ADS } });
+  res.json({
+    ...settings.get(),
+    limits: { ads: settings.MAX_ADS, uploadBytes: config.largestUpload },
+  });
 });
 
 /**
@@ -226,7 +229,8 @@ app.post('/api/media', adminLimit, adminOnly, mediaBody, (req, res) => {
 
     // The name is ours, not the browser's: a filename from outside is a path
     // waiting to escape the folder it was meant for.
-    const kind = req.body.kind === 'logo' ? 'logo' : 'ad';
+    const kinds = ['logo', 'ad', 'background'];
+    const kind = kinds.includes(req.body.kind) ? req.body.kind : 'ad';
     const name = `${kind}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}.${ext}`;
 
     const saved = storage.save('media', name, buffer);

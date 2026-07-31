@@ -125,6 +125,7 @@ connect(
     // Saved in the admin panel: applied here on the spot, on the connection
     // that is already open for boats. Nothing restarts and nothing reloads.
     if (event.type === 'settings' && event.settings) {
+      applyBackground(event.settings);
       overlay.apply(event.settings);
       return;
     }
@@ -151,7 +152,9 @@ async function loadSettings() {
     const response = await fetch('/api/settings');
     if (!response.ok) throw new Error(`Server returned ${response.status}`);
 
-    overlay.apply(await response.json());
+    const settings = await response.json();
+    applyBackground(settings);
+    overlay.apply(settings);
   } catch (err) {
     // The wall keeps working without them; they are decoration, not the show.
     console.warn('[display] could not load display settings:', err.message);
@@ -160,11 +163,38 @@ async function loadSettings() {
 
 loadSettings();
 
+/** The video the kiosk ships with, and what it falls back to. */
+const DEFAULT_BACKGROUND = '/assets/background/bg.mp4';
+
+/**
+ * Swaps the video behind everything, if the panel has been given one.
+ *
+ * The original file is never touched, so clearing it in the panel puts the
+ * kiosk's own back. The canvas skips a frame or two while the new one loads -
+ * `drawBackground` waits for it to have data - which is a moment of black on a
+ * change somebody made deliberately.
+ */
+function applyBackground(settings) {
+  const wanted = (settings.background && settings.background.url) || DEFAULT_BACKGROUND;
+  const current = backgroundSource.getAttribute('src');
+  if (current === wanted) return;
+
+  backgroundSource.src = wanted;
+  backgroundSource.load();
+  startBackground();
+
+  console.log(`[display] background is now ${wanted}`);
+}
+
 // Autoplay is allowed because the video is muted; without it the canvas would
 // draw a still first frame forever.
-backgroundSource.play().catch((err) => {
-  console.warn('[display] background video did not start:', err.message);
-});
+function startBackground() {
+  backgroundSource.play().catch((err) => {
+    console.warn('[display] background video did not start:', err.message);
+  });
+}
+
+startBackground();
 
 stage.start();
 

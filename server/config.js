@@ -18,6 +18,29 @@ function num(value, fallback) {
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+/** '40mb' and the like, as a number. */
+function bytes(size) {
+  const match = /^\s*([\d.]+)\s*(b|kb|mb|gb)?\s*$/i.exec(String(size));
+  if (!match) return 0;
+
+  const units = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 };
+  return Math.round(Number(match[1]) * (units[(match[2] || 'b').toLowerCase()] || 1));
+}
+
+/**
+ * The largest file the panel can actually put through an upload endpoint.
+ *
+ * Not the same as the limit itself. The panel sends a file as a base64 data
+ * URL, and base64 is four bytes on the wire for every three of file, so a 40mb
+ * ceiling on the request accepts a file of about 30MB. Worked out here rather
+ * than left for somebody to discover when a 35MB video is rejected by a limit
+ * that says 40.
+ */
+function largestFile(size) {
+  const envelope = 512; // the JSON around it, and the data URL preamble
+  return Math.max(0, Math.floor(((bytes(size) - envelope) * 3) / 4));
+}
+
 module.exports = {
   // A host assigns the port and passes it in; 3000 when running locally.
   port: Number(process.env.PORT) || 3000,
@@ -161,11 +184,19 @@ module.exports = {
     recording:
       process.env.MAX_RECORDING_UPLOAD_SIZE || process.env.MAX_UPLOAD_SIZE || '30mb',
 
-    // A logo is small; an advertisement can be a video.
+    // A logo is small; an advertisement or a background can be a video.
     media: process.env.MAX_MEDIA_UPLOAD_SIZE || '40mb',
 
     // The settings themselves are a few hundred bytes of JSON. Nothing that
     // arrives at that endpoint has any business being larger.
     settings: '256kb',
   },
+
+  /**
+   * The largest file the panel can upload, in bytes.
+   *
+   * Told to the panel so it can say so up front and turn a file away with a
+   * useful message, rather than sending thirty megabytes to be met with a 413.
+   */
+  largestUpload: largestFile(process.env.MAX_MEDIA_UPLOAD_SIZE || '40mb'),
 };
