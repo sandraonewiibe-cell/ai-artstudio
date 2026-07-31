@@ -3,6 +3,24 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 
 /**
+ * Settings from a .env file, if there is one.
+ *
+ * A kiosk is set up by whoever is running the exhibition, on the machine, once.
+ * Asking them to export variables into the shell that happens to start the
+ * server is a good way to have the kiosk come back after a reboot missing its
+ * API key. A file next to the application is harder to lose.
+ *
+ * Anything already in the environment wins, so a host that injects its own
+ * configuration - Render does - is unaffected. The file is gitignored, because
+ * it is where the secrets go.
+ */
+try {
+  process.loadEnvFile(path.join(ROOT, '.env'));
+} catch {
+  // No .env, or a Node without it. Neither is a problem.
+}
+
+/**
  * Reads a numeric setting, treating unset and empty as "not configured".
  *
  * `Number(x) || fallback` would be wrong here: several of these settings use 0
