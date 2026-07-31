@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-import { GLB } from './config.js';
+import { GLB, PADDLES } from './config.js';
+import { rig, pose } from './animate.js';
 
 /**
  * Renders the GLB the 3D pipeline made from the visitor's sketch.
@@ -111,7 +112,15 @@ export class BoatGL {
 
     if (this.model) this.pivot.remove(this.model);
     this.model = scene || null;
-    if (this.model) this.pivot.add(this.model);
+    this.rigging = null;
+
+    if (!this.model) return;
+
+    this.pivot.add(this.model);
+
+    // Rigged the first time it is shown and remembered after that. If it cannot
+    // be rigged, it is simply shown still - the model is on the wall either way.
+    this.rigging = rig(this.model);
   }
 
   clear() {
@@ -135,7 +144,19 @@ export class BoatGL {
     this.pivot.position.y = heave;
     this.pivot.rotation.set(nod, GLB.baseYaw, roll * GLB.roll);
 
+    // The paddles run on the same clock as the splashes, so a blade is entering
+    // the water at the moment the water answers it.
+    pose(this.rigging, {
+      stroke: (elapsed / PADDLES.stroke.periodMs) * Math.PI * 2,
+      elapsed,
+    });
+
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Where the water meets this model, as the rigging measured it. */
+  get waterline() {
+    return this.rigging ? this.rigging.waterline : 0;
   }
 }
 
@@ -157,7 +178,7 @@ export async function loadModel(url) {
 
   if (!loader) loader = new GLTFLoader();
 
-  const work = loader
+  const parse = loader
     .loadAsync(url)
     .then((gltf) => {
       const model = frame(gltf.scene);
@@ -167,8 +188,14 @@ export async function loadModel(url) {
     .catch((err) => {
       console.warn(`[glb] could not load ${url}:`, err.message);
       return null;
-    })
-    .finally(() => loading.delete(url));
+    });
+
+  // A load that never settles is worse than one that fails: the caller is left
+  // awaiting it forever, and on an unattended wall nobody is going to notice.
+  // Whatever the loader is doing, this answers.
+  const work = Promise.race([parse, after(GLB.loadTimeoutMs, url)]).finally(() =>
+    loading.delete(url)
+  );
 
   loading.set(url, work);
   return work;
@@ -177,6 +204,16 @@ export async function loadModel(url) {
 /** Loads it now so that showing it later is instant. */
 export function preload(url) {
   return loadModel(url);
+}
+
+/** Gives up after a while, with "no model" rather than with nothing. */
+function after(ms, url) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      console.warn(`[glb] gave up waiting for ${url} after ${Math.round(ms / 1000)}s`);
+      resolve(null);
+    }, ms);
+  });
 }
 
 /**

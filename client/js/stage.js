@@ -1,4 +1,4 @@
-import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB } from './config.js';
+import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB, ANIMATE } from './config.js';
 import { Boat3D } from './boat3d.js';
 
 /**
@@ -335,6 +335,10 @@ export class Stage {
       this.drawReflection(centreX, waterline, boatW, boatH, tilt, elapsed);
     }
 
+    // The trail the boat has left. Behind it, so it belongs under the ripples
+    // that are directly beneath the hull.
+    if (sculpted) this.drawWake(centreX, waterline, boatW, elapsed, progress);
+
     this.drawRipples(centreX, waterline, boatW, elapsed);
 
     if (sculpted) {
@@ -625,6 +629,49 @@ export class Stage {
         sliceDst + 1,
         height
       );
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * The wake: the water the boat has already been through.
+   *
+   * Arcs shed behind the hull, widening and fading as they fall astern. They
+   * trail towards where the boat came from, which is the left - the crossing
+   * runs left to right - so the boat always looks like it is going somewhere
+   * rather than sitting on a moving background.
+   *
+   * Nothing is simulated. Each arc is a function of how long ago it was shed,
+   * which costs a few ellipses a frame and reads correctly at the back of a
+   * hall.
+   */
+  drawWake(centreX, baseY, boatW, elapsed, progress) {
+    const { ctx } = this;
+    const { count, periodMs, spread, opacity, lineWidth } = ANIMATE.wake;
+
+    // Nothing to leave behind until the boat has actually moved.
+    const travelled = Math.min(1, progress * 4);
+    if (travelled <= 0.01) return;
+
+    ctx.save();
+    ctx.lineWidth = lineWidth;
+
+    for (let i = 0; i < count; i += 1) {
+      const age = (((elapsed / periodMs) + i / count) % 1 + 1) % 1;
+
+      // Astern, and further with every moment.
+      const behind = boatW * (0.35 + spread * age);
+      const rx = boatW * (0.18 + 0.5 * age);
+      const ry = rx * 0.22;
+
+      const fade = (1 - age) * opacity * travelled;
+      if (fade <= 0.01) continue;
+
+      ctx.strokeStyle = `rgba(255, 255, 255, ${fade.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(centreX - behind, baseY + ry * 0.5, rx, ry, 0, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
     }
 
     ctx.restore();

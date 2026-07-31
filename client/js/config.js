@@ -526,6 +526,60 @@ export const GLB = {
   // rendered frame drawn again upside down, so it costs one blit rather than a
   // second pass over the model.
   reflection: { opacity: 0.2, squash: 0.42 },
+
+  // How long to wait for a model before deciding there is not going to be one.
+  // A load that never settles leaves the wall waiting on it forever, and on an
+  // unattended screen nobody is going to notice that it has.
+  loadTimeoutMs: 20000,
+};
+
+/**
+ * Making the generated model move, without taking it apart.
+ *
+ * The mesh stays exactly as it came back: one object, one set of materials, one
+ * texture. Everything below happens in the vertex shader, so the paddles sweep
+ * and the hull flexes while every triangle stays where it was in the file.
+ *
+ * On the GPU rather than in JavaScript, and not for elegance: a generated boat
+ * is a hundred thousand vertices, and touching them all sixty times a second
+ * from JavaScript would cost more than the whole rest of the frame. This way
+ * the per-frame cost is a handful of uniforms.
+ *
+ * Which vertices count as "paddle" is a guess about a mesh nobody has seen -
+ * the ones furthest out from the centreline. On a rowing boat those are the
+ * oars. Raise `swingStart` if something that is not an oar starts moving.
+ */
+export const ANIMATE = {
+  enabled: true,
+
+  // How far out from the centreline a vertex has to be before it sweeps, as a
+  // fraction of the half-width. 1 is the very tip of the widest thing.
+  swingStart: 0.58,
+
+  // How far they sweep and dip, as fractions of the boat's length.
+  sweep: 0.055,
+  dip: 0.022,
+
+  // Opposite sides pull opposite ways, which is what rowing looks like.
+  sideLag: Math.PI,
+
+  // The hull working in the swell. Small: a boat flexes, it does not ripple.
+  flex: 0.012,
+  flexPeriodMs: 3800,
+
+  // Vertices sampled when working out where the waterline is. A boat's widest
+  // point is at its sheer, and a few thousand vertices find it as well as all
+  // of them - this runs while a model is being prepared, not while it is shown.
+  waterlineSamples: 6000,
+
+  // The trail on the water behind the boat.
+  wake: {
+    count: 5,
+    periodMs: 2800,
+    spread: 1.35,
+    opacity: 0.26,
+    lineWidth: 2,
+  },
 };
 
 export const WAVES = {
