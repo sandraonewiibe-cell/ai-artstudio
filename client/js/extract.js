@@ -24,6 +24,12 @@ export function extractDrawing(pageCanvas) {
   const width = pageCanvas.width;
   const height = pageCanvas.height;
   const page = context2d(pageCanvas).getImageData(0, 0, width, height);
+
+  // The paper is white. Where the camera disagrees, every colour on the sheet
+  // is being read through that error, so it is corrected before anything else
+  // measures anything from it.
+  balanceToPaper(page);
+
   const luma = toLuminance(page);
 
   const margin = Math.round(Math.min(width, height) * EXTRACT.marginRatio);
@@ -90,9 +96,6 @@ export function extractDrawing(pageCanvas) {
     height
   );
 
-  // Blank enclosed paper takes the boat's colour, not an average that the
-  // handwriting has been mixed into.
-  const meanInk = meanInkColour(page, walls);
   const drawingBounds = unionBounds(kept);
   const rect = cropRect(drawingBounds, width, height);
 
@@ -103,7 +106,7 @@ export function extractDrawing(pageCanvas) {
   const paint = paintedRegions(page, width, height, drawingBounds);
   for (let i = 0; i < fill.length; i += 1) if (paint.mask[i]) fill[i] = 1;
 
-  const base = { page, luma, strokes, width, height, reference, meanInk };
+  const base = { page, luma, strokes, width, height, reference };
 
   const rendered = renderLayer({ ...base, fill, preserve, paint, rect });
   if (!rendered) return null;
@@ -315,7 +318,16 @@ function paintedRegions(page, width, height, bounds) {
 
   if (!colours.length) return empty;
 
-  closeEdgePits(region, mask, colours.length, width, height, box, radius);
+  // Enough passes to close a pit rather than only its rim. A hole wider than a
+  // pixel fills from the outside in - the middle of a three-by-three gap has no
+  // coloured neighbours at all on the first pass, four on the second, and only
+  // joins on the third - so a fixed pass or two leaves a white speck sitting in
+  // the middle of a coloured area, which is the one thing this exists to stop.
+  //
+  // Overshooting is free: the pass loop stops the moment nothing joins, and the
+  // five-of-eight rule means open paper can never be joined at all, so this
+  // converges on the pits and cannot spread past them.
+  closeEdgePits(region, mask, colours.length, width, height, box, Math.max(8, radius));
 
   return { mask, region, colours };
 }
@@ -751,25 +763,6 @@ function boxDistance(a, b) {
   return Math.hypot(dx, dy);
 }
 
-/** Average colour of the boat's strokes, used to fill blank enclosed paper. */
-function meanInkColour(page, mask) {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let n = 0;
-
-  for (let i = 0; i < mask.length; i += 1) {
-    if (!mask[i]) continue;
-    r += page.data[i * 4];
-    g += page.data[i * 4 + 1];
-    b += page.data[i * 4 + 2];
-    n += 1;
-  }
-
-  if (!n) return { r: 20, g: 20, b: 20 };
-  return { r: r / n, g: g / n, b: b / n };
-}
-
 /**
  * True if a component lies entirely inside one of the four corner boxes.
  *
@@ -829,7 +822,7 @@ function unionBounds(components) {
  * hull, and the paper immediately around and inside it.
  */
 function renderLayer({
-  page, luma, strokes, fill, width, height, reference, meanInk, rect, preserve, paint,
+  page, luma, strokes, fill, width, height, reference, rect, preserve, paint,
 }) {
   const { x0, y0, x1, y1 } = rect;
 
@@ -903,9 +896,16 @@ function renderLayer({
           dst[di + 1] = ink ? ink.g : g;
           dst[di + 2] = ink ? ink.b : b;
         } else {
-          dst[di] = meanInk.r;
-          dst[di + 1] = meanInk.g;
-          dst[di + 2] = meanInk.b;
+          // Blank paper inside the hull - no stroke, no colour, no darker than
+          // the sheet around it. It used to be filled with the average of the
+          // boat's ink, which made a solid body of it, and made a dark one out
+          // of empty white space the child never coloured in.
+          //
+          // It is paper, so it is shown as paper. Nothing on the wall is a
+          // colour that was not on the page.
+          dst[di] = r;
+          dst[di + 1] = g;
+          dst[di + 2] = b;
         }
 
         dst[di + 3] = 255;
@@ -1003,6 +1003,66 @@ function vivid(r, g, b) {
  * and every line is exactly what was drawn. The floor stops a soft pencil
  * becoming a printed rule.
  */
+/**
+ * Corrects the scan against the one thing on the page whose colour is known.
+ *
+ * A kiosk camera under hall lighting does not photograph white paper as white.
+ * On the scans this was built against it came out rgb(183, 187, 202): three
+ * quarters of the brightness it should have, with a blue cast on top. Every
+ * colour on that sheet is then wrong by the same amount, and a light green
+ * pencil lands as a dark neutral - which the ink test, quite correctly by its
+ * own rule, calls pencil rather than colour and renders as a grey stroke.
+ *
+ * So the paper is used as what it is: a reference white, lying in plain sight
+ * on every page. Scaling each channel until the paper reads white puts the rest
+ * of the sheet back where it belongs. That is a correction, not a preference -
+ * no colour is chosen here, and a sheet photographed correctly is left alone.
+ *
+ * It cannot recover what was never recorded. A drawing lit so poorly that the
+ * colour is gone from the file stays gone; this restores what the camera
+ * flattened, not what it missed.
+ */
+function balanceToPaper(page) {
+  const { enabled, target, percentile, maxGain } = EXTRACT.whiteBalance;
+  if (!enabled) return null;
+
+  // The bright end of each channel is the paper. Taken as a percentile rather
+  // than a maximum, so one specular glare off a biro line cannot define it.
+  const white = [0, 1, 2].map((channel) => brightEnd(page.data, channel, percentile));
+  const gain = white.map((value) => (value > 0 ? Math.min(maxGain, target / value) : 1));
+
+  // Already white. A scan that needs nothing is given nothing.
+  if (gain.every((g) => g > 0.98 && g < 1.02)) return null;
+
+  const data = page.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] *= gain[0];
+    data[i + 1] *= gain[1];
+    data[i + 2] *= gain[2];
+  }
+
+  return { white, gain };
+}
+
+/** Where the brightest q of a channel begins. */
+function brightEnd(data, channel, q) {
+  const histogram = new Uint32Array(256);
+  let count = 0;
+
+  for (let i = channel; i < data.length; i += 4) {
+    histogram[data[i]] += 1;
+    count += 1;
+  }
+
+  let seen = 0;
+  for (let value = 255; value >= 0; value -= 1) {
+    seen += histogram[value];
+    if (seen >= count * (1 - q)) return value;
+  }
+
+  return 255;
+}
+
 function deepen(r, g, b) {
   const { inkDepth, inkFloor } = EXTRACT.boost;
   if (!inkDepth) return { r, g, b };

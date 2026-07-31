@@ -258,6 +258,37 @@ export const EXTRACT = {
   },
 
   /**
+   * Reading the page as it was drawn, not as the camera lit it.
+   *
+   * A kiosk camera does not photograph white paper as white. Under hall
+   * lighting it comes out dim and tinted - on the scans this was measured
+   * against, rgb(183, 187, 202) where it should be near white. Everything drawn
+   * on that sheet is then wrong by the same amount, and a light green pencil
+   * arrives as a dark neutral: not enough colour left in it for the extraction
+   * to call it colour at all, so it is drawn as grey pencil instead.
+   *
+   * The paper itself is the way out. It is white, it is on every page, and it
+   * is most of the frame, so it can be used as a reference white and the whole
+   * sheet corrected against it. Nothing is chosen or invented by doing this -
+   * a page that photographed correctly is left exactly alone.
+   */
+  whiteBalance: {
+    enabled: true,
+
+    // What white paper should read. Not 255: a little headroom keeps a bright
+    // sheet from clipping the moment it is corrected.
+    target: 245,
+
+    // The paper is the bright end of the page. Taken as a percentile so a
+    // single glare off a pen line cannot stand in for the sheet.
+    percentile: 0.98,
+
+    // A ceiling on the correction. Past this, a scan is not tinted - it is too
+    // dark to read, and stretching it further only magnifies the noise.
+    maxGain: 2.2,
+  },
+
+  /**
    * Making the drawing carry to the back of a hall.
    *
    * A pencil sketch photographed on white paper is a pale thing. On a desk it
