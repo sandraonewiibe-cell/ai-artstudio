@@ -1008,7 +1008,11 @@ function deepen(r, g, b) {
   if (!inkDepth) return { r, g, b };
 
   const [hue, sat, light] = toHsl(r, g, b);
-  const darker = Math.max(inkFloor, light * (1 - inkDepth));
+
+  // Never lighter than it was drawn. The floor exists to stop a soft pencil
+  // being crushed to a printed rule, so it has no business raising ink that was
+  // already darker than it - black ink is meant to stay black.
+  const darker = Math.min(light, Math.max(inkFloor, light * (1 - inkDepth)));
 
   return toRgb(hue, sat, darker);
 }

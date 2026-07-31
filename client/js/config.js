@@ -266,26 +266,36 @@ export const EXTRACT = {
    * is the visitor's drawing being wrong - it is a scan being faithful to
    * paper, which is not what it has to survive.
    *
-   * Two adjustments, and both keep what was drawn:
+   * Colour is left exactly as scanned, and ink is darkened. The two are
+   * separate settings because they answer to different things.
    *
-   *   - colour gets its saturation back, with the hue untouched. The number
-   *     that says "which colour" is carried through exactly; only the number
-   *     that says "how much of it" moves.
-   *   - ink goes darker. Outline and handwriting are the same thing to this -
-   *     both are pencil, both are what makes the drawing readable, and neither
-   *     changes shape by being deepened.
+   * Colour is off deliberately. Lifting saturation held the hue exactly, but on
+   * a real scan it changed the answer to "what colour is this": a drawing whose
+   * fill photographed as rgb(103, 111, 137) - a grey with a hint of blue in it -
+   * was being filled as rgb(57, 86, 183), which is blue. Hue is only one of the
+   * three numbers that make a colour, and the other two are just as much the
+   * child's. A fill now shows the RGB that was on the paper, and nothing else.
    *
-   * Set any of these to 0 to leave that part exactly as scanned.
+   * Ink is a different question. Darkening a pencil line changes how strongly
+   * it reads, not which colour it is - grey graphite stays grey graphite - and
+   * an outline that goes invisible at forty feet is a drawing nobody can see at
+   * all. So that stays on.
+   *
+   * Set any of these to 0 to leave that part exactly as scanned. Raise
+   * saturation above 0 to bring the colour lift back.
    */
   boost: {
-    // How far towards full saturation a coloured-in area is pushed...
-    saturation: 0.45,
+    // How far towards full saturation a coloured-in area is pushed. 0 fills the
+    // exact scanned RGB, which is what this does now.
+    saturation: 0,
 
-    // ...and a floor, so a washed-out crayon still arrives as a colour.
-    minSaturation: 0.34,
+    // ...and a floor, so a washed-out crayon still arrives as a colour. Only
+    // consulted when saturation is on.
+    minSaturation: 0,
 
     // Lightness is pulled into this band. Too dark and the colour reads black
-    // on a wall; too light and it washes out under the projector.
+    // on a wall; too light and it washes out under the projector. Only
+    // consulted when saturation is on.
     minLightness: 0.34,
     maxLightness: 0.62,
 
