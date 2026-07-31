@@ -560,8 +560,27 @@ export const ANIMATE = {
   sweep: 0.055,
   dip: 0.022,
 
-  // Opposite sides pull opposite ways, which is what rowing looks like.
-  sideLag: Math.PI,
+  /**
+   * How far out of step the two sides are.
+   *
+   * Zero, because this is a chundan vallam and its crew paddle in unison - the
+   * whole purpose of the vanchipattu is that a hundred people pull on the same
+   * beat. It was set to half a stroke, which is a pair of sculling oars, and
+   * put the two sides of a snake boat permanently in opposition.
+   *
+   * Set it to Math.PI for a rowing boat with oars in rowlocks.
+   */
+  sideLag: 0,
+
+  /**
+   * How far above the waterline a vertex can be and still paddle, as a fraction
+   * of the boat's length.
+   *
+   * A paddle works at the water. A chundan's stern rises twenty feet and a
+   * canopy stands clear of it, and both of those are as far out from the
+   * centreline as a blade is - without this they sweep along with the paddles.
+   */
+  reachAboveWater: 0.3,
 
   // The hull working in the swell. Small: a boat flexes, it does not ripple.
   flex: 0.012,

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { ANIMATE } from './config.js';
+import { ANIMATE, PADDLES } from './config.js';
 
 /**
  * Makes a generated boat move, without taking it apart.
@@ -38,6 +38,9 @@ const CHUNK = `
   uniform float uDip;
   uniform float uSideLag;
   uniform float uFlex;
+  uniform float uCatch;
+  uniform float uWaterline;
+  uniform float uReach;
   uniform mat4  uBoatFromLocal;
   uniform mat4  uLocalFromBoat;
 `;
@@ -48,15 +51,31 @@ const BODY = `
   float along   = clamp(dot(boat, uForward) / uHalfLength, -1.0, 1.0);
   float lateral = dot(boat, uSide) / uHalfWidth;
 
-  // How much of an oar this vertex is: nothing near the centreline, all of it
-  // at the widest point. Smoothed, so there is no seam across the hull.
+  // How much of a paddle this vertex is. Two things have to be true: it has to
+  // be well out from the centreline, and it has to be down near the water.
+  //
+  // The second matters more than it sounds. A snake boat's stern rises twenty
+  // feet, and a canopy stands well clear of the water - without a height test
+  // both of them are "out from the centre" and both would paddle. The waterline
+  // was already being measured for exactly this and was not being used.
   float outboard = smoothstep(uSwingStart, 1.0, abs(lateral));
+  float above = max(0.0, (boat.y - uWaterline) / uHalfLength);
+  float atTheWater = 1.0 - smoothstep(0.0, uReach, above);
 
-  // The two sides pull against each other.
-  float phase = uStroke + (lateral < 0.0 ? uSideLag : 0.0);
+  float blade = outboard * atTheWater;
 
-  boat += uForward * (sin(phase) * uSweep * uHalfLength * outboard);
-  boat.y -= cos(phase) * uDip * uHalfLength * outboard;
+  // The crew stroke together. On a chundan vallam every paddler pulls on the
+  // same beat - the whole point of the vanchipattu is that they do - so the two
+  // sides are in unison unless someone sets uSideLag deliberately.
+  float phase = uStroke + (lateral < 0.0 ? uSideLag : 0.0) - uCatch;
+
+  // Quadrature, so the blade travels an ellipse: down and back through the
+  // water, up and forward on the recovery. Offset by uCatch so the deepest
+  // point of that ellipse is the instant the splash is thrown - they were a
+  // quarter of a stroke apart, and the water answered a paddle that was
+  // already on its way back up.
+  boat += uForward * (sin(phase) * uSweep * uHalfLength * blade);
+  boat.y -= cos(phase) * uDip * uHalfLength * blade;
 
   // The hull working: the ends rise and fall against the middle.
   boat.y += sin(uFlexPhase + along * 3.14159265) * uFlex * uHalfLength;
@@ -93,6 +112,13 @@ export function rig(model) {
       uDip: { value: ANIMATE.dip },
       uSideLag: { value: ANIMATE.sideLag },
       uFlex: { value: ANIMATE.flex },
+
+      // Where in the stroke the blade is deepest. The same number the splash
+      // fires on, so the two cannot drift apart.
+      uCatch: { value: PADDLES.stroke.catchPhase * Math.PI * 2 },
+
+      uWaterline: { value: shape.waterline },
+      uReach: { value: ANIMATE.reachAboveWater },
     };
 
     let patched = 0;
