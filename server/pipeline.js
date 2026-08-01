@@ -6,9 +6,9 @@ const { loadOcr } = require('./ocr');
 const { loadClassifier } = require('./classifier');
 const { loadEnhancer } = require('./enhancers');
 const { loadModel3D } = require('./models3d');
+const pipeline3d = require('./pipeline3d');
 const { assertResult } = require('./providers/base');
 const { assertEnhanced } = require('./enhancers/base');
-const { assertSculpted } = require('./models3d/base');
 const events = require('./events');
 
 const provider = loadProvider();
@@ -65,9 +65,16 @@ function serialize(job) {
  * or anything else: one picture of what the visitor drew, one object back.
  */
 async function sculpt(job, drawing) {
-  if (model3d.name === 'none') return;
+  // Whether anything is expected to produce a model this run.
+  //
+  // The stages always run - that is how they get exercised on real drawings
+  // while depth and mesh are still placeholders - but the job only carries a
+  // model status when something could actually finish one. A kiosk with no
+  // plugin configured reports no model rather than a permanently pending one,
+  // which is what it did before this pipeline existed.
+  const expected = model3d.name !== 'none';
 
-  job.model = { status: 'working', url: null, provider: model3d.name };
+  if (expected) job.model = { status: 'working', url: null, provider: model3d.name };
 
   try {
     // 1. Tidy the sketch, if anything is configured to. The default leaves it
@@ -83,7 +90,7 @@ async function sculpt(job, drawing) {
     const fingerprint = crypto.createHash('sha256').update(enhanced.buffer).digest('hex');
     const known = models.get(fingerprint);
 
-    if (known) {
+    if (known && expected) {
       job.model = { status: 'ready', url: known, provider: model3d.name, cached: true };
       console.log(`[3d] ${job.id.slice(0, 8)} matched a model already made`);
       events.broadcast('model', { id: job.id, model: job.model });
@@ -92,37 +99,57 @@ async function sculpt(job, drawing) {
 
     const started = Date.now();
 
-    const sculpted = assertSculpted(
-      await model3d.generate({
-        ...enhanced,
+    // 3. Through the pipeline: background removal, extraction, depth, mesh,
+    //    texture, export. Which of those do anything is the pipeline's business
+    //    and not this file's - it is handed a drawing and gives back a model or
+    //    says which stage it got to.
+    const outcome = await pipeline3d.run(
+      { page: drawing, drawing: enhanced.buffer, mime: enhanced.mime || 'image/png' },
+      {
+        job: job.id,
         text: job.text,
         faces: config.mesh.faces,
         texture: config.mesh.texture,
-      }),
-      model3d.name
+      }
     );
 
+    const sculpted = outcome.model;
+
     if (!sculpted) {
-      job.model = { status: 'off', url: null, provider: model3d.name };
+      if (expected) {
+        job.model = { status: 'off', url: null, provider: model3d.name, stoppedAt: outcome.stoppedAt };
+      }
+
       return;
     }
 
     const saved = storage.save('models', `${job.prefix}-boat.${sculpted.ext}`, sculpted.buffer);
     remember(fingerprint, saved.url);
 
-    job.model = { status: 'ready', url: saved.url, provider: model3d.name };
-
     console.log(
       `[3d] ${job.id.slice(0, 8)} modelled in ${Math.round((Date.now() - started) / 1000)}s ` +
-        `(${Math.round(sculpted.buffer.length / 1024)}KB)`
+        `(${Math.round(sculpted.buffer.length / 1024)}KB) by ${sculpted.by}`
     );
+
+    // Made, and saved, either way. Whether the wall is told is a separate
+    // question: announcing a model swaps the display from the boat the browser
+    // inflates to the one the server exported, and that is a change to what an
+    // exhibition looks like rather than to what this pipeline produces. Asking
+    // for a plugin is already that decision; the pipeline's own model waits for
+    // MESH_PUBLISH.
+    if (!expected && !config.mesh.publish) return;
+
+    job.model = { status: 'ready', url: saved.url, provider: sculpted.by || model3d.name };
 
     events.broadcast('model', { id: job.id, model: job.model });
   } catch (err) {
     // A model that never arrives costs an animation. The boat is already on the
     // wall and the visitor already has their clip.
     console.warn(`[3d] ${job.id.slice(0, 8)} produced no model:`, err.message);
-    job.model = { status: 'failed', url: null, provider: model3d.name, error: err.message };
+
+    if (expected) {
+      job.model = { status: 'failed', url: null, provider: model3d.name, error: err.message };
+    }
   }
 }
 
@@ -329,6 +356,7 @@ module.exports = {
     classifier: classifier.name,
     enhancer: enhancer.name,
     model3d: model3d.name,
+    pipeline3d: pipeline3d.describe(),
   },
   warmup: () => (ocr.warmup ? ocr.warmup() : Promise.resolve()),
 };

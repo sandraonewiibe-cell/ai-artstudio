@@ -213,6 +213,98 @@ module.exports = {
   mesh: {
     faces: num(process.env.MESH_FACES, 40000),
     texture: process.env.MESH_TEXTURE !== 'false',
+
+    /**
+     * Grid resolution along the drawing's longer edge.
+     *
+     * The dial to turn for detail. The shorter edge follows from the drawing's
+     * own proportions, so this never changes the shape of anything - only how
+     * finely it is divided. The face budget above is a ceiling over it: where
+     * the two disagree the budget wins, because a model that has to reach a
+     * phone over exhibition wifi has a size it must come in under whatever
+     * looked good on a desk.
+     */
+    grid: num(process.env.MESH_GRID, 128),
+
+    /**
+     * Whether the wall is told about a model the pipeline built itself.
+     *
+     * Off. The exporter works and every model it makes is written to disk, but
+     * announcing one swaps the display from the boat the browser inflates to the
+     * GLB the server exports - and that is a change to what an exhibition looks
+     * like, not a change to what this pipeline produces. It should be turned on
+     * deliberately, after somebody has looked at the two side by side.
+     *
+     * A configured plugin is announced either way: asking for one is already the
+     * decision this setting is about.
+     */
+    publish: process.env.MESH_PUBLISH === 'true',
+  },
+
+  /**
+   * What the scanner leaves behind.
+   *
+   * Background removal happens in the browser, and mostly works. These two
+   * settings clear what measurably survives it, and nothing else - there is no
+   * fold or border rule here, because no scan on disk showed either, and a
+   * filter written against a fault nobody has seen is how a child's drawing gets
+   * deleted.
+   */
+  cleanup: {
+    // How opaque a pixel must be to count as part of the drawing.
+    alphaThreshold: num(process.env.CLEANUP_ALPHA, 128),
+
+    /**
+     * How far into the page a corner reaches.
+     *
+     * A piece lying *wholly* inside a corner this size is a printed marker or
+     * the corner of the sheet. The scanner already does this at 0.14 of the page
+     * and the markers overshoot it by around twenty pixels, so this is a little
+     * wider - and wholly is the word that keeps it safe: a drawing that merely
+     * reaches towards a corner has a bounding box that leaves it again.
+     */
+    cornerRatio: Number(process.env.CLEANUP_CORNER || 0.2),
+
+    // Below this share of the frame a piece is dust rather than a drawn mark.
+    // Low: the dot of an 'i' is tiny and losing it mangles handwriting.
+    minAreaRatio: Number(process.env.CLEANUP_MIN_AREA || 0.00004),
+  },
+
+  /**
+   * Turning the silhouette into a height.
+   *
+   * A distance transform: how far each point of the drawing is from the nearest
+   * point outside it. The middle of a shape stands proudest and the rim lies
+   * flat on the page. It asks only "how far in is this", which is a question
+   * every drawing can answer - so a boat, a flower, a house and a dog all
+   * inflate sensibly, none of them having had to be recognised first.
+   */
+  depth: {
+    // How opaque a pixel must be to count as part of the drawing.
+    alphaThreshold: num(process.env.DEPTH_ALPHA, 128),
+
+    /**
+     * The curve of the bulge.
+     *
+     * Below one rounds off quickly at the rim and flattens across the middle,
+     * which reads as a solid with a soft edge. At one the shape comes to a
+     * ridge along its centre like a tent.
+     */
+    profile: Number(process.env.DEPTH_PROFILE || 0.65),
+
+    // Total thickness at the deepest point, against a model one unit across.
+    thickness: Number(process.env.DEPTH_THICKNESS || 0.22),
+
+    /**
+     * The widest the height field is worked out at.
+     *
+     * A scan can be several megapixels and the field gains nothing from the last
+     * of them, since the mesh samples it far more coarsely anyway. Anything
+     * bigger is stepped down by a whole number - a whole number rather than a
+     * resample, because taking every nth pixel cannot invent a boundary that was
+     * not there, and the silhouette is the one thing that must not shift.
+     */
+    maxWidth: num(process.env.DEPTH_MAX_WIDTH, 1024),
   },
 
   /**

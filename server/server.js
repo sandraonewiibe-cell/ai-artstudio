@@ -9,6 +9,7 @@ const recordings = require('./recordings');
 const ratelimit = require('./ratelimit');
 const settings = require('./settings');
 const { publicBase, candidates } = require('./network');
+const preview = require('./pipeline3d/preview');
 
 const app = express();
 
@@ -91,6 +92,53 @@ app.get('/qr', (req, res) => {
 // ...and a fourth for whoever is running the exhibition, which no visitor sees.
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(config.paths.client, 'admin.html'));
+});
+
+/**
+ * A fifth, for looking at the geometry the pipeline builds.
+ *
+ * Development only: it builds a mesh on demand, and it lists what visitors have
+ * drawn. See server/pipeline3d/preview.js for why a listing is worth withholding
+ * even though the files themselves are already served.
+ */
+app.get('/preview', (req, res) => {
+  if (!preview.available()) return res.status(404).send('Not available in production.');
+  return res.sendFile(path.join(config.paths.client, 'preview.html'));
+});
+
+app.get('/api/preview/drawings', (req, res) => {
+  if (!preview.available()) return res.status(404).json({ error: 'not available' });
+  return res.json({ drawings: preview.list() });
+});
+
+app.get('/api/preview/drawing/:name', (req, res) => {
+  if (!preview.available()) return res.status(404).json({ error: 'not available' });
+
+  try {
+    res.type('image/png').send(preview.drawing(req.params.name));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.get('/api/preview/glb/:name', (req, res) => {
+  if (!preview.available()) return res.status(404).json({ error: 'not available' });
+
+  try {
+    res.type('model/gltf-binary').send(preview.glb(req.params.name));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.get('/api/preview/mesh/:name', async (req, res) => {
+  if (!preview.available()) return res.status(404).json({ error: 'not available' });
+
+  try {
+    res.json(await preview.build(req.params.name));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.use(express.static(config.paths.client));
@@ -361,6 +409,7 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`  classifier:     ${pipeline.info.classifier}`);
   console.log(`  sketch enhancer:${pipeline.info.enhancer}`);
   console.log(`  3D provider:    ${describe3D()}`);
+  console.log(`  3D pipeline:    ${pipeline.info.pipeline3d}`);
 
   // The QR code carries the first of these. If a phone cannot reach it, it is
   // on one of the others - set PUBLIC_HOST to whichever matches the network the

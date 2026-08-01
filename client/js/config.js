@@ -351,7 +351,7 @@ export const EXTRACT = {
      *
      * 0 reproduces the scanned RGB bit for bit.
      */
-    saturation: 0.15,
+    saturation: 0,
 
     // A floor under saturation, for a crayon that photographed as almost no
     // colour at all. Left at 0: a floor would push every faint colour to the
