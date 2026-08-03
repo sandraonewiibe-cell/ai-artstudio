@@ -1,5 +1,6 @@
 import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB, ANIMATE } from './config.js';
 import { Boat3D } from './boat3d.js';
+import { sealHoles } from './seal.js';
 
 /**
  * Three.js, fetched the first time a model actually needs it.
@@ -144,7 +145,12 @@ export class Stage {
   async show(job) {
     const image = await loadImage(job.imageUrl);
 
-    this.boat = image;
+    // A hull the visitor shaded faintly can arrive with see-through patches in
+    // the middle of it, and the wall would show the lake through them. Closed
+    // up here, with the colour that surrounds each gap, before anything is
+    // drawn or built from it - so the flat boat, its reflection and the model
+    // all get the same sealed drawing. Nothing outside the sketch is touched.
+    this.boat = sealHoles(image);
     this.paddles = [];
     this.splashes = [];
 
