@@ -443,11 +443,10 @@ export class Stage {
     // The reflection lies *on* the surface, so it goes over the water rather
     // than under it - after the veil, not before. It used to be drawn first, and
     // was then partly covered by the hull it was supposed to be a reflection of.
-    if (sculpted) {
-      this.drawSculptReflection(centreX, waterline, boatW, boatH);
-    } else if (!this.modelReady) {
-      this.drawReflection(centreX, waterline, boatW, boatH, tilt, elapsed);
-    }
+    //
+    // Whatever drew the boat this frame is what gets reflected, so every way of
+    // showing a boat reflects, and reflects the boat that is actually there.
+    this.drawReflection(this.mirrorSource(boatW, boatH), centreX, centreY, waterline, tilt, elapsed);
 
     // The water reacts to the blades whichever boat is on it. The positions
     // came off the visitor's drawing and the model was made from that same
@@ -683,19 +682,25 @@ export class Stage {
     this.ctx.drawImage(this.gl.canvas, centreX - size / 2, centreY - size / 2, size, size);
   }
 
-  /** The same rendered frame, mirrored under the hull and faded back. */
-  drawSculptReflection(centreX, waterline, boatW, boatH) {
-    const { ctx } = this;
-    const { opacity, squash } = GLB.reflection;
-
-    const size = Math.max(boatW, boatH) * GLB.cover;
-
-    ctx.save();
-    ctx.globalAlpha = opacity;
-    ctx.translate(centreX, waterline);
-    ctx.scale(1, -squash);
-    ctx.drawImage(this.gl.canvas, -size / 2, -size / 2, size, size);
-    ctx.restore();
+  /**
+   * The picture the water reflects: the visitor's sketch, always.
+   *
+   * The same drawing that is on the wall, mirrored - which is what a reflection
+   * on water is. Not a re-render, not a second version of the boat, not the
+   * lit and yawed model: the sketch, as scanned, upside down in the lake.
+   *
+   * That it does not depend on which of the three renderers drew the boat is
+   * the point twice over. It is the same picture the visitor is looking at, and
+   * it works whichever way the boat is being shown - where before there was one
+   * reflection for a generated model, one for the flat drawing, and none at all
+   * for the inflated one, which is the path the wall actually runs.
+   *
+   * The box is the flat boat's, because that is the room the boat occupies
+   * however it is drawn - the model is built from this drawing and rendered to
+   * very nearly the same footprint.
+   */
+  mirrorSource(boatW, boatH) {
+    return { image: this.boat, width: boatW, height: boatH };
   }
 
   drawModel(centreX, centreY, boatW, boatH, tilt, elapsed) {
@@ -757,50 +762,157 @@ export class Stage {
   }
 
   /**
-   * Squashed, faded mirror image below the waterline, distorted more strongly
-   * than the hull. The single most convincing cue that the boat is on water.
+   * The boat, mirrored in the water under it.
+   *
+   * Built a row at a time into a buffer and then composited, rather than drawn
+   * straight onto the wall, because every part of what makes a reflection read
+   * as one needs the finished mirror to work on.
+   *
+   * Mirrored about the surface. The old version put it on the wrong side of the
+   * line: it drew into a flipped frame starting at zero, which lands the image
+   * *above* the waterline with the top of the boat nearest the water. Measured
+   * on a real scan it occupied rows 327-528 against a waterline at 557 - wholly
+   * above it, entirely behind the opaque hull, which is why it read as a smudge
+   * under the drawing rather than as a reflection. Here row zero of the buffer
+   * is the waterline and depth increases away from it, so the boat hangs
+   * downwards from the surface with its own waterline against the line.
+   *
+   * Only what is above the water is reflected, because only that is above the
+   * water to be reflected. The submerged quarter is already accounted for by the
+   * water drawn in front of it.
+   *
+   * Distorted by the water it is lying on. Each row is shifted sideways by the
+   * swell, sampled further along with depth so the distortion travels, and by
+   * more the further from the boat it gets - which is the shape a real
+   * reflection breaks into. The displacement comes from the same wave field the
+   * hull is riding, so the reflection wanders in step with the water rather than
+   * to a rhythm of its own.
+   *
+   * Blurred by how much the water is moving. The surface's steepness under the
+   * boat is measured each frame and sets the blur, so the mirror sharpens as the
+   * lake flattens and smears when a swell runs through.
+   *
+   * Faded with distance, in two passes. The near half is drawn sharp and the far
+   * half blurred, each under its own gradient, so the reflection is crisp where
+   * it leaves the hull and dissolves as it goes down - with no band or edge
+   * anywhere, because both passes are smooth and simply add.
    */
-  drawReflection(centreX, waterline, boatW, boatH, tilt, elapsed) {
+  drawReflection({ image, width: drawW, height: drawH }, centreX, centreY, waterline, tilt, elapsed) {
+    if (!image || !drawW || !drawH) return;
+
     const { ctx } = this;
-    const { opacity, squash, wobble } = WAVES.reflection;
+    const { opacity, squash, wobble, blurPx, blurGain, sharpShare } = WAVES.reflection;
 
-    // The same scan the hull is drawn from, so the reflection is a mirror of
-    // what is actually on the water and not of some other version of it.
-    const image = this.boat;
+    // How much of the boat is out of the water: that is all there is to mirror.
+    const boxTop = centreY - drawH / 2;
+    const above = waterline - boxTop;
+    if (above < 4) return;
 
-    const slices = WAVES.slices;
-    const sliceSrc = image.width / slices;
-    const sliceDst = boatW / slices;
-    const height = boatH * squash;
+    const bufW = Math.ceil(drawW);
+    const bufH = Math.ceil(above * squash);
+    if (bufH < 4 || bufW < 4) return;
 
-    ctx.save();
-    ctx.globalAlpha = opacity;
-    ctx.translate(centreX, waterline);
-    ctx.rotate(-tilt);
-    ctx.scale(1, -1); // mirror
+    const srcW = image.naturalWidth || image.width;
+    const srcH = image.naturalHeight || image.height;
+    if (!srcW || !srcH) return;
 
-    for (let i = 0; i < slices; i += 1) {
-      const offset = -boatW / 2 + i * sliceDst;
-      const worldX = centreX + offset;
+    // Room either side for a row to wander without running off its own buffer.
+    const margin = Math.ceil(Math.abs(wobble) * 24 + blurPx * 3);
+    const buffer = this.bufferFor(bufW + margin * 2, bufH, 'mirrorBuffer');
+    const bctx = buffer.getContext('2d');
+    bctx.clearRect(0, 0, buffer.width, buffer.height);
 
-      // Exaggerated and phase-shifted, the way a reflection breaks up on a
-      // moving surface.
-      const shimmer = this.waveAt(worldX * 1.6, elapsed * 1.4) * wobble;
+    // One row of source per row of buffer, sampled upwards from the waterline
+    // and nudged sideways by the water.
+    const perRow = (srcH / drawH) / squash;
 
-      ctx.drawImage(
+    for (let y = 0; y < bufH; y += 1) {
+      const depth = y / bufH;
+
+      // Where on the boat this row of the reflection comes from: the waterline
+      // at depth 0, the top of the boat at the far end.
+      const srcY = ((waterline - y / squash) - boxTop) * (srcH / drawH);
+      if (srcY < 0 || srcY >= srcH) continue;
+
+      const shift = this.waveAt(centreX + y * 6, elapsed * 1.4) * wobble * (0.25 + depth);
+
+      bctx.drawImage(
         image,
-        i * sliceSrc,
-        0,
-        sliceSrc,
-        image.height,
-        offset + shimmer * 0.08,
-        shimmer * 0.15,
-        sliceDst + 1,
-        height
+        0, srcY, srcW, Math.max(1, perRow),
+        margin + shift, y, bufW, 1
       );
     }
 
+    // How hard the water is working, measured as the slope of the surface
+    // across the boat. A flat lake gives a sharp mirror; a swell smears it.
+    const span = Math.max(24, drawW * 0.25);
+    const steepness = Math.abs(
+      this.waveAt(centreX + span, elapsed) - this.waveAt(centreX - span, elapsed)
+    ) / span;
+
+    const blur = blurPx + blurGain * steepness;
+
+    ctx.save();
+    ctx.translate(centreX, waterline);
+    ctx.rotate(-tilt);
+
+    const left = -bufW / 2 - margin;
+
+    // Near: sharp, strongest at the surface, gone by the middle.
+    ctx.globalAlpha = opacity;
+    ctx.drawImage(this.fadedMirror(buffer, bufH, 0, sharpShare), left, 0);
+
+    // Far: blurred, absent at the surface and fading out at the end. The two
+    // overlap through the middle, so neither shows an edge.
+    ctx.globalAlpha = opacity * 0.85;
+    ctx.filter = `blur(${blur.toFixed(2)}px)`;
+    ctx.drawImage(this.fadedMirror(buffer, bufH, sharpShare, 1), left, 0);
+    ctx.filter = 'none';
+
     ctx.restore();
+  }
+
+  /**
+   * A copy of the mirror, present only across one band of depth.
+   *
+   * A copy rather than the buffer itself, because the mirror is wanted twice -
+   * once sharp and once blurred - and fading it where it stands would leave the
+   * second pass working on what the first had already rubbed out.
+   *
+   * Within the band it runs from full strength at the near edge to nothing at
+   * the far one; outside it there is nothing at all. Two bands drawn one over
+   * the other therefore sum to a single fade from the waterline to nothing, with
+   * no seam between them.
+   */
+  fadedMirror(mirror, bufH, from, to) {
+    const copy = this.bufferFor(mirror.width, mirror.height, 'fadeBuffer');
+    const cctx = copy.getContext('2d');
+
+    cctx.clearRect(0, 0, copy.width, copy.height);
+    cctx.drawImage(mirror, 0, 0);
+
+    // Opaque means "erase this". Nothing is taken from the near edge of the
+    // band, everything from the far edge, and all of what lies outside it.
+    const gradient = cctx.createLinearGradient(0, from * bufH, 0, to * bufH);
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, 'rgba(0,0,0,1)');
+
+    cctx.save();
+    cctx.globalCompositeOperation = 'destination-out';
+
+    // Everything nearer the surface than the band.
+    if (from > 0) {
+      cctx.fillStyle = 'rgba(0,0,0,1)';
+      cctx.fillRect(0, 0, copy.width, from * bufH);
+    }
+
+    // ...and, across the band itself, more of it the deeper it goes. Past the
+    // far edge the gradient's own last stop carries on erasing.
+    cctx.fillStyle = gradient;
+    cctx.fillRect(0, from * bufH, copy.width, copy.height - from * bufH);
+    cctx.restore();
+
+    return copy;
   }
 
   /**

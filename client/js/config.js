@@ -743,10 +743,9 @@ export const GLB = {
   sunIntensity: 1.7,
   sun: [3, 5, 2],
 
-  // Mirrored under the hull, the same cue the flat boat uses. It is the same
-  // rendered frame drawn again upside down, so it costs one blit rather than a
-  // second pass over the model.
-  reflection: { opacity: 0.2, squash: 0.42 },
+  // A generated model no longer has a reflection of its own. There is one
+  // reflection now, of the visitor's sketch, and every way of showing a boat
+  // gets it - see WAVES.reflection.
 
   // How long to wait for a model before deciding there is not going to be one.
   // A load that never settles leaves the wall waiting on it forever, and on an
@@ -879,12 +878,55 @@ export const WAVES = {
   // costs more; 72 is indistinguishable from 200 at this size.
   slices: 72,
 
-  // Mirrored reflection under the hull - the strongest single cue that the
-  // boat is floating on something.
+  /**
+   * The boat's reflection in the water under it - the strongest single cue that
+   * it is floating on something.
+   *
+   * Nothing here says where it goes. The reflection hangs from wherever the
+   * water crosses the boat, which is measured from the drawing, so these only
+   * describe what water does to a mirror image.
+   */
   reflection: {
-    opacity: 0.22,
-    squash: 0.42,
+    // How strongly it shows.
+    //
+    // A reflection is a hint rather than a copy, but it has to be a hint you can
+    // actually see. At 0.22 the mirror was there and unreadable - the sheer line
+    // and the thwarts were just visible against the lake and nothing else was.
+    opacity: 0.46,
+
+    /**
+     * Foreshortening: how tall the mirror is against what it mirrors.
+     *
+     * Near 1 rather than the 0.42 this used to be, and the reason is where the
+     * boat is rather than any question of perspective. A quarter of the hull is
+     * under the water, so the boat itself already occupies the first stretch
+     * below the waterline; a mirror squashed to 0.42 came out shorter than that
+     * and was drawn almost entirely over the submerged hull, where it read as a
+     * smudge on the boat rather than as a reflection in the lake.
+     *
+     * At 0.85 the mirror is nearly the length of what is above the water, so it
+     * hangs well clear of the hull and can be seen for what it is, while still
+     * being a little shorter than the boat the way a reflection is.
+     */
+    squash: 0.85,
+
+    // How far the water pulls the mirror about sideways, in pixels of swell.
+    // The displacement grows with depth, so this is the strength at the far end
+    // rather than everywhere.
     wobble: 1.8,
+
+    // Blur when the lake is flat, in pixels...
+    blurPx: 1.2,
+
+    // ...and how much the surface's own steepness adds to it. This is what
+    // makes the mirror sharpen and smear as the swell runs through, rather than
+    // being softened by a fixed amount for ever.
+    blurGain: 42,
+
+    // How much of the reflection is drawn sharp before the blurred pass takes
+    // over. The two overlap and add, so this is where the handover is centred
+    // rather than a line anything is cut at.
+    sharpShare: 0.45,
   },
 };
 
