@@ -370,7 +370,17 @@ export class Stage {
     // that are directly beneath the hull.
     if (sculpted) this.drawWake(centreX, waterline, boatW, elapsed, progress);
 
-    this.drawRipples(centreX, waterline, boatW, elapsed);
+    // The rings that used to spread out from under the hull are not drawn.
+    //
+    // They were meant to read as ripples and did not. On a photographed lake
+    // they came out as a hard white ellipse sitting on the water beside the
+    // boat - a drawn circle, plainly not part of either the sketch or the
+    // scene, and the first thing the eye went to. The wake astern does the job
+    // they were there for.
+    //
+    // drawRipples() is left in place: the shape was never the problem, the
+    // white stroke on a bright background was, and it wants rebuilding as a
+    // distortion of the water rather than a line drawn over it.
 
     if (sculpted) {
       this.drawSculpt(centreX, centreY, boatW, boatH);
