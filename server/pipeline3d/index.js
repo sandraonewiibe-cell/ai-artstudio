@@ -34,6 +34,11 @@ const STAGES = [
   require('./stages/glb'),
 ].map((stage, i) => contract.assertStage(stage, stage && stage.name ? stage.name : `#${i}`));
 
+// The stages an image-to-3D service stands in for. Background removal and
+// extraction are not among them: whatever is sent away should be the child's
+// drawing rather than a photograph of a table.
+const BUILDERS = ['depth', 'mesh', 'glb'];
+
 // Which assertion guards each stage's output. Keeping them here rather than
 // inside the stages means a stage cannot decline to be checked.
 const GUARDS = {
@@ -75,6 +80,11 @@ async function run(sheet, options = {}) {
   };
 
   const plugin = loadPlugin();
+  let asked = false;
+
+  // Why the service gave nothing, kept even when the local stages go on to
+  // succeed. A fallback that works is not a reason to stop saying what failed.
+  let pluginError = null;
 
   for (const stage of STAGES) {
     const input = made[stage.takes];
@@ -88,12 +98,50 @@ async function run(sheet, options = {}) {
       continue;
     }
 
-    // A plugin stands in for the middle of the pipeline. Where one is
-    // configured, the stages that would have built the model are stood down in
-    // favour of it - but background removal and extraction still run first, so
-    // what gets sent away is the drawing rather than the photograph.
-    if (plugin && ['depth', 'mesh', 'glb'].includes(stage.name)) {
-      report.push({ stage: stage.name, skipped: true, why: `the ${plugin.name} plugin is doing this` });
+    // The service gets its turn first, and only once.
+    //
+    // It is asked here rather than after the loop so that the stages it would
+    // replace are still ahead of it. If it answers, they stand down; if it does
+    // not, they run and the visitor gets the model this pipeline can build
+    // itself. That ordering is the whole of "the exhibition never breaks" -
+    // asking afterwards, as this used to, left nothing to fall back to.
+    if (plugin && !asked && BUILDERS.includes(stage.name)) {
+      asked = true;
+      const started = Date.now();
+
+      const attempt = await plugin.generate(made.Artwork, context);
+      const took = Date.now() - started;
+
+      for (const step of attempt.trail || []) {
+        console.log(`[3d] ${job} ${plugin.name} try ${step.attempt}: ${step.why} (${step.ms}ms)`);
+      }
+
+      const model = contract.assertModel(attempt.model, plugin.name);
+
+      report.push({
+        stage: `plugin:${plugin.name}`,
+        gave: model ? 'Model' : null,
+        ms: took,
+        why: (attempt.trail || []).map((s) => s.why).join('; '),
+        tries: (attempt.trail || []).length,
+      });
+
+      if (model) {
+        made.Model = model;
+        console.log(`[3d] ${job} ${plugin.name}: ${Math.round(model.buffer.length / 1024)}KB (${took}ms)`);
+      } else {
+        // Quiet means the provider declined rather than failed - no token, or
+        // switched off - and there is nothing there to call broken.
+        if (!attempt.quiet) {
+          pluginError = (attempt.trail || []).map((s) => s.why).pop() || 'the provider gave nothing';
+        }
+        console.log(`[3d] ${job} ${plugin.name}: nothing usable after ${took}ms - building one here instead`);
+      }
+    }
+
+    // Where the service did answer, there is nothing for these to do.
+    if (made.Model && BUILDERS.includes(stage.name)) {
+      report.push({ stage: stage.name, skipped: true, why: `the ${plugin.name} plugin already did this` });
       continue;
     }
 
@@ -140,22 +188,11 @@ async function run(sheet, options = {}) {
     console.log(`[3d] ${job} ${stage.name}: ${said} (${took}ms)`);
   }
 
-  // The plugin runs where the stages it replaced would have.
-  if (plugin && made.Artwork) {
-    const started = Date.now();
-
-    const model = contract.assertModel(await plugin.generate(made.Artwork, context), plugin.name);
-    const took = Date.now() - started;
-
-    if (model) made.Model = model;
-    report.push({ stage: `plugin:${plugin.name}`, gave: model ? 'Model' : null, ms: took });
-    console.log(`[3d] ${job} plugin ${plugin.name}: ${model ? `${Math.round(model.buffer.length / 1024)}KB` : 'nothing'} (${took}ms)`);
-  }
-
   const stoppedAt = made.Model ? null : firstGap(report);
 
   return {
     model: made.Model || null,
+    pluginError,
     mesh: made.Mesh || null,
     texture: made.Texture || null,
     stages: report,

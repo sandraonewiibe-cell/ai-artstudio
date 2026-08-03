@@ -181,7 +181,7 @@ module.exports = {
     // Generous, because nobody is waiting on it. Long enough for a queue on a
     // busy afternoon, short enough that a wedged prediction is eventually let
     // go rather than held forever.
-    timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 5 * 60 * 1000),
+    timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 90 * 1000),
   },
 
   /** Everything the Hugging Face Space provider needs. Ignored by the others. */
@@ -200,7 +200,7 @@ module.exports = {
 
     // Shared with Replicate, because it is the same question: how long to give
     // a queue before letting go. Nobody is waiting on it either way.
-    timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 5 * 60 * 1000),
+    timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 90 * 1000),
   },
 
   /**
@@ -239,6 +239,19 @@ module.exports = {
      * decision this setting is about.
      */
     publish: process.env.MESH_PUBLISH === 'true',
+  },
+
+  /**
+   * Asking an image-to-3D service, and what to do when it does not answer.
+   */
+  plugin: {
+    // How many times to ask. A free Space is queued and occasionally asleep,
+    // and neither of those is a reason to give a visitor no boat.
+    attempts: num(process.env.PLUGIN_ATTEMPTS, 2),
+
+    // Multiplied by the attempt number, so a second try waits longer than the
+    // first. Nobody is waiting on this: the boat is already on the wall.
+    backoffMs: num(process.env.PLUGIN_BACKOFF_MS, 4000),
   },
 
   /**

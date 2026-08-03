@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fs = require('fs');
 const config = require('./config');
 const storage = require('./storage');
 const { loadProvider } = require('./providers');
@@ -88,12 +89,19 @@ async function sculpt(job, drawing) {
     //    minute of somebody else's GPU: a sheet rescanned because the first
     //    attempt was missed is the common case at a kiosk.
     const fingerprint = crypto.createHash('sha256').update(enhanced.buffer).digest('hex');
-    const known = models.get(fingerprint);
+    const id = job.id.slice(0, 8);
+    const known = recall(fingerprint);
 
-    if (known && expected) {
-      job.model = { status: 'ready', url: known, provider: model3d.name, cached: true };
-      console.log(`[3d] ${job.id.slice(0, 8)} matched a model already made`);
-      events.broadcast('model', { id: job.id, model: job.model });
+    if (known) {
+      console.log(
+        `[3d] ${id} CACHE HIT  source=${known.by}  ${Math.round(known.bytes / 1024)}KB  ${known.url}`
+      );
+
+      if (expected || config.mesh.publish) {
+        job.model = { status: 'ready', url: known.url, provider: known.by, cached: true };
+        events.broadcast('model', { id: job.id, model: job.model });
+      }
+
       return;
     }
 
@@ -115,20 +123,55 @@ async function sculpt(job, drawing) {
 
     const sculpted = outcome.model;
 
+    // One line saying where the model came from, what it cost, and - when the
+    // service was asked and could not answer - why the pipeline built its own.
+    // Whoever is running an exhibition should be able to tell an AI model from a
+    // local one at a glance, without reading six stage lines to work it out.
+    const plugin = outcome.stages.find((s) => String(s.stage).startsWith('plugin:'));
+    const local = outcome.stages
+      .filter((s) => ['background', 'artwork', 'depth', 'mesh', 'texture', 'glb'].includes(s.stage))
+      .reduce((total, s) => total + (s.ms || 0), 0);
+
+    const timings =
+      `total=${Date.now() - started}ms` +
+      (plugin ? `  ai=${plugin.ms}ms(${plugin.tries || 0} tr${(plugin.tries || 0) === 1 ? 'y' : 'ies'})` : '') +
+      `  local=${local}ms`;
+
     if (!sculpted) {
+      console.log(
+        `[3d] ${id} NO MODEL  ${timings}` +
+          (outcome.pluginError ? `  ai failed: ${outcome.pluginError}` : '') +
+          (outcome.stoppedAt ? `  stopped at ${outcome.stoppedAt}` : '')
+      );
+
       if (expected) {
-        job.model = { status: 'off', url: null, provider: model3d.name, stoppedAt: outcome.stoppedAt };
+        // A service that was asked and could not answer is a failure, and says so,
+        // even though the pipeline then had nothing of its own to fall back to.
+        job.model = outcome.pluginError
+          ? { status: 'failed', url: null, provider: model3d.name, error: outcome.pluginError }
+          : { status: 'off', url: null, provider: model3d.name, stoppedAt: outcome.stoppedAt };
       }
 
       return;
     }
 
     const saved = storage.save('models', `${job.prefix}-boat.${sculpted.ext}`, sculpted.buffer);
-    remember(fingerprint, saved.url);
+
+    remember(fingerprint, {
+      url: saved.url,
+      path: saved.path,
+      by: sculpted.by,
+      bytes: sculpted.buffer.length,
+    });
+
+    // 'glb' is this pipeline's own exporter; anything else is the service that
+    // stood in for it.
+    const source = sculpted.by === 'glb' ? 'LOCAL GLB' : `AI GLB (${sculpted.by})`;
 
     console.log(
-      `[3d] ${job.id.slice(0, 8)} modelled in ${Math.round((Date.now() - started) / 1000)}s ` +
-        `(${Math.round(sculpted.buffer.length / 1024)}KB) by ${sculpted.by}`
+      `[3d] ${id} ${source}  ${Math.round(sculpted.buffer.length / 1024)}KB  ${timings}` +
+        (outcome.pluginError ? `  fell back because: ${outcome.pluginError}` : '') +
+        `  ${saved.url}`
     );
 
     // Made, and saved, either way. Whether the wall is told is a separate
@@ -153,15 +196,43 @@ async function sculpt(job, drawing) {
   }
 }
 
-/** Fingerprint of a drawing to the model it produced. */
+/**
+ * Fingerprint of a drawing to the model made from it.
+ *
+ * Worth checking before a minute of somebody else's GPU: a sheet rescanned
+ * because the first attempt was missed is the common case at a kiosk, and the
+ * same drawing is the same model.
+ */
 const models = new Map();
 const MODEL_CACHE = 200;
 
-function remember(fingerprint, url) {
-  models.set(fingerprint, url);
+function remember(fingerprint, entry) {
+  models.set(fingerprint, entry);
 
   // Oldest out first; the Map keeps insertion order for us.
   if (models.size > MODEL_CACHE) models.delete(models.keys().next().value);
+}
+
+/**
+ * A cached model, if there is still a file behind it.
+ *
+ * The map outlives the disk. Anything that clears generated/ - a redeploy, a
+ * tidy-up, a full volume - leaves entries pointing at files that are not there,
+ * and a cache hit on one of those is a boat that never loads. So the file is
+ * checked before the entry is trusted, and a stale one is dropped rather than
+ * served.
+ */
+function recall(fingerprint) {
+  const entry = models.get(fingerprint);
+  if (!entry) return null;
+
+  if (!fs.existsSync(entry.path)) {
+    models.delete(fingerprint);
+    console.log(`[3d] cache had ${entry.url} but the file is gone - making another`);
+    return null;
+  }
+
+  return entry;
 }
 
 async function run(job, paperBuffer, drawingBuffer, layers) {
