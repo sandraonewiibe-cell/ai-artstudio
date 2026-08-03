@@ -81,7 +81,7 @@ export function extractDrawing(pageCanvas) {
   // Which components are big enough to count as the boat. Only areas these
   // help enclose get filled, so every compartment inside the hull fills while
   // the counters of O, A, B and e stay open.
-  const hullLabels = selectHullLabels(kept, writingLabels);
+  const hullLabels = selectHullLabels(kept, writingLabels, labels, width, height);
   const walls = buildStrokeMask(labels, hullLabels, width, height);
 
   const hullBounds = unionBounds(kept.filter((c) => hullLabels.has(c.label)));
@@ -92,6 +92,7 @@ export function extractDrawing(pageCanvas) {
     hullLabels,
     writingLabels,
     hullBounds,
+    walls,
     width,
     height
   );
@@ -624,17 +625,110 @@ function within(component, box) {
  * Writing is excluded whatever its size: what this set decides is which marks
  * may enclose an area that then gets filled solid, and the inside of an O is
  * not a compartment of the boat.
+ *
+ * Size is not enough on its own. Ripples drawn under the boat are long strokes,
+ * and long means plenty of pixels - enough to clear the size bar, and on a
+ * drawing with a lot of water in it, enough to be the biggest thing on the page
+ * outright. So a mark has to be closed as well as big: it has to go round
+ * something, the way an outline goes round the boat.
+ *
+ * If nothing is closed, the biggest mark is taken on trust. A boat drawn with a
+ * gap in its outline is still the boat, and leaving the drawing with no hull at
+ * all is worse than leaving it with an unfilled one.
  */
-function selectHullLabels(components, writingLabels = new Set()) {
-  const largest = largestOf(components);
-  const threshold = largest.area * EXTRACT.fill.hullShareRatio;
+function selectHullLabels(components, writingLabels = new Set(), labels = null, width = 0, height = 0) {
+  const threshold = largestOf(components).area * EXTRACT.fill.hullShareRatio;
 
-  return new Set(
-    components
-      .filter((c) => !writingLabels.has(c.label))
-      .filter((c) => c.area >= threshold)
-      .map((c) => c.label)
-  );
+  const big = components
+    .filter((c) => !writingLabels.has(c.label))
+    .filter((c) => c.area >= threshold);
+
+  if (!labels || !big.length) return new Set(big.map((c) => c.label));
+
+  const closed = big.filter((c) => enclosesArea(c, labels, width, height));
+
+  return new Set((closed.length ? closed : [largestOf(big)]).map((c) => c.label));
+}
+
+/**
+ * How much a mark must close off to count as a hull, against how much ink it is
+ * drawn with.
+ *
+ * A hull is one big loop: a little ink goes a long way round and shuts in many
+ * times its own area. Ripples are a lot of ink shutting in a few small cells
+ * where the strokes cross. Measured on a drawn boat: 8.4 times its ink. Measured
+ * on crossing ripples: 2.5.
+ *
+ * Enclosed area on its own does not separate them - both enclose plenty in
+ * absolute terms, and as a share of the bounding box they are 0.57 against 0.33,
+ * too close to call.
+ */
+const HULL_ENCLOSED_PER_INK = 4;
+
+/**
+ * True if a component closes off an area worth calling a hull.
+ *
+ * Floods the background inward from the edge of the component's own bounding
+ * box, with only that component in the way. Whatever the flood cannot reach is
+ * walled in by the mark alone.
+ *
+ * What is then compared is how much it shut in against how much ink it took to
+ * do it. A hull is one loop, so a little ink goes a long way round and shuts in
+ * many times its own area. Ripples are long strokes crossing each other, and
+ * the cells they trap between them are small next to all that ink. Enclosed
+ * area alone cannot tell the two apart; enclosed area per stroke can.
+ *
+ * The box is grown by a pixel first so the flood always has somewhere to start,
+ * even for a mark that fills its box corner to corner.
+ */
+function enclosesArea(component, labels, width, height) {
+  const minX = Math.max(0, component.minX - 1);
+  const minY = Math.max(0, component.minY - 1);
+  const maxX = Math.min(width - 1, component.maxX + 1);
+  const maxY = Math.min(height - 1, component.maxY + 1);
+
+  const w = maxX - minX + 1;
+  const h = maxY - minY + 1;
+  if (w < 3 || h < 3) return false;
+
+  const seen = new Uint8Array(w * h);
+  const stack = new Int32Array(w * h);
+  let top = 0;
+  let open = 0;
+
+  const push = (x, y) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const i = y * w + x;
+    if (seen[i]) return;
+    if (labels[(minY + y) * width + (minX + x)] === component.label) return;
+    seen[i] = 1;
+    open += 1;
+    stack[top++] = i;
+  };
+
+  for (let x = 0; x < w; x += 1) {
+    push(x, 0);
+    push(x, h - 1);
+  }
+  for (let y = 0; y < h; y += 1) {
+    push(0, y);
+    push(w - 1, y);
+  }
+
+  while (top > 0) {
+    const i = stack[--top];
+    const x = i % w;
+    const y = (i - x) / w;
+
+    push(x - 1, y);
+    push(x + 1, y);
+    push(x, y - 1);
+    push(x, y + 1);
+  }
+
+  const enclosed = w * h - component.area - open;
+
+  return enclosed >= component.area * HULL_ENCLOSED_PER_INK;
 }
 
 /**
@@ -663,39 +757,11 @@ function selectHullLabels(components, writingLabels = new Set()) {
  * @param {Set<number>} hullLabels components counting as the boat
  * @param {Set<number>} writingLabels components written on the boat
  * @param {{minX:number,maxX:number,minY:number,maxY:number}} bounds hull extent
+ * @param {Uint8Array} walls the hull components alone
  * @returns {{fill: Uint8Array, filled: number, preserve: Uint8Array}}
  */
-function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, width, height) {
-  const outside = new Uint8Array(width * height);
-  const stack = new Int32Array(width * height);
-  let top = 0;
-
-  const push = (i) => {
-    if (!strokes[i] && !outside[i]) {
-      outside[i] = 1;
-      stack[top++] = i;
-    }
-  };
-
-  for (let x = 0; x < width; x += 1) {
-    push(x);
-    push((height - 1) * width + x);
-  }
-  for (let y = 0; y < height; y += 1) {
-    push(y * width);
-    push(y * width + width - 1);
-  }
-
-  while (top > 0) {
-    const i = stack[--top];
-    const x = i % width;
-    const y = (i - x) / width;
-
-    if (x > 0) push(i - 1);
-    if (x < width - 1) push(i + 1);
-    if (y > 0) push(i - width);
-    if (y < height - 1) push(i + width);
-  }
+function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, walls, width, height) {
+  const outside = floodFromBorder(strokes, width, height);
 
   // Safety valve. If the flood barely got anywhere, the page border is walled
   // off by ink and "enclosed" has stopped meaning anything - filling on that
@@ -720,8 +786,40 @@ function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, w
 
   const { labels: holeLabels } = labelComponents(enclosed, width, height);
 
+  // The same flood again, with only the hull in the way this time.
+  //
+  // An area is inside the boat because the boat goes round it. If the page can
+  // still reach it once everything but the hull is taken out of the way, then
+  // it was never inside the boat: it is open paper that a decoration happened
+  // to fence off - the stretch between the hull and a ripple drawn under it,
+  // which is what came out as a grey slab beneath the drawing.
+  //
+  // Compartments are not affected. The gap between two thwarts is walled off
+  // by the hull whether the thwarts are there or not, so this flood cannot
+  // reach it either, and it fills as before.
+  const reachable = floodFromBorder(walls, width, height);
+  const fenced = new Set();
+
+  for (let i = 0; i < enclosed.length; i += 1) {
+    if (enclosed[i] && reachable[i]) fenced.add(holeLabels[i]);
+  }
+
   const fillable = holesTouchingHull(enclosed, holeLabels, strokes, labels, hullLabels, width, height);
   const inWriting = holesTouchingHull(enclosed, holeLabels, strokes, labels, writingLabels, width, height);
+
+  // The same valve again, for the same reason. If the hull on its own seals
+  // nothing whatsoever, this test has stopped meaning anything - a boat whose
+  // outline is closed by a separate deck line is still a boat, and emptying it
+  // out would be worse than the slab. Only act when the hull does hold water.
+  const holes = new Set();
+  for (let i = 0; i < enclosed.length; i += 1) if (enclosed[i]) holes.add(holeLabels[i]);
+
+  if (fenced.size < holes.size) {
+    for (const hole of fenced) {
+      fillable.delete(hole);
+      inWriting.delete(hole);
+    }
+  }
 
   const fill = new Uint8Array(width * height);
   const preserve = new Uint8Array(width * height);
@@ -760,6 +858,48 @@ function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, w
   for (let i = 0; i < preserve.length; i += 1) if (around[i]) preserve[i] = 1;
 
   return { fill, filled, preserve };
+}
+
+/**
+ * The background, flooded inward from the page border.
+ *
+ * 1 wherever the page can be reached from outside without crossing a barrier;
+ * anything left at 0 is walled in. Four-connectivity, so a diagonal pencil line
+ * still counts as a seal.
+ */
+function floodFromBorder(barrier, width, height) {
+  const outside = new Uint8Array(width * height);
+  const stack = new Int32Array(width * height);
+  let top = 0;
+
+  const push = (i) => {
+    if (!barrier[i] && !outside[i]) {
+      outside[i] = 1;
+      stack[top++] = i;
+    }
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    push(x);
+    push((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y += 1) {
+    push(y * width);
+    push(y * width + width - 1);
+  }
+
+  while (top > 0) {
+    const i = stack[--top];
+    const x = i % width;
+    const y = (i - x) / width;
+
+    if (x > 0) push(i - 1);
+    if (x < width - 1) push(i + 1);
+    if (y > 0) push(i - width);
+    if (y < height - 1) push(i + width);
+  }
+
+  return outside;
 }
 
 /**
