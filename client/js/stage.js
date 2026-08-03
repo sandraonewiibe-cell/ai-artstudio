@@ -1,6 +1,7 @@
-import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB, ANIMATE } from './config.js';
+import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB, ANIMATE, FLOAT } from './config.js';
 import { Boat3D } from './boat3d.js';
 import { sealHoles } from './seal.js';
+import { measureHull } from './waterline.js';
 
 /**
  * Three.js, fetched the first time a model actually needs it.
@@ -46,9 +47,22 @@ const MOTION = {
   boatMaxWidth: 0.42, // of canvas width
   boatMaxHeight: 0.48, // of canvas height
 
-  // Where the waterline sits on the canvas.
+  // Where the surface of the water sits on the canvas.
+  //
+  // This is the water, not the boat. How deep a particular boat floats in it is
+  // measured from that boat's own drawing - see waterline.js - so nothing here
+  // has to know anything about what was drawn.
   waterlineY: 0.52,
 };
+
+/**
+ * Where the water crosses a drawing, when it cannot be measured.
+ *
+ * Only reached if the picture has no silhouette to measure, which means there is
+ * nothing to float either. It is the figure the old hard-coded placement worked
+ * out to, kept so that path behaves exactly as it always did.
+ */
+const FALLBACK_WATERLINE = 0.75;
 
 /**
  * Where the organiser's things sit, as fractions of the wall.
@@ -103,6 +117,12 @@ export class Stage {
     /** Scratch canvas for feathering an advertisement's edge. Built on demand. */
     this.adBuffer = null;
 
+    /** Scratch canvas for the water drawn in front of the submerged hull. */
+    this.waterBuffer = null;
+
+    /** Where the water crosses this boat, measured from its own silhouette. */
+    this.hull = null;
+
     // Built once and reused. Creating a WebGL context per visitor would leak
     // contexts until the browser started refusing them.
     this.model = MODEL3D.enabled ? Boat3D.create(1024, 1024) : null;
@@ -153,6 +173,19 @@ export class Stage {
     this.boat = sealHoles(image);
     this.paddles = [];
     this.splashes = [];
+
+    // How deep this particular boat floats, read off its own silhouette. Done
+    // once, here, rather than per frame: it is a property of the drawing and the
+    // drawing does not change while it is on the wall.
+    this.hull = measureHull(this.boat);
+    if (this.hull) {
+      console.log(
+        `[stage] hull spans ${this.hull.top.toFixed(3)}-${this.hull.bottom.toFixed(3)} ` +
+        `of the drawing; water crosses it at ${this.hull.waterline.toFixed(3)}`
+      );
+    } else {
+      console.warn('[stage] no silhouette to measure; floating the drawing as it comes');
+    }
 
     // `this.boat` is the only image on screen, ever. The scan as it arrived,
     // in one piece, with nothing taken out of it and nothing laid on top of it.
@@ -268,6 +301,7 @@ export class Stage {
   /** Back to background only. */
   clear() {
     this.boat = null;
+    this.hull = null;
     if (this.gl) this.gl.clear();
     this.paddles = [];
     this.splashes = [];
@@ -348,8 +382,19 @@ export class Stage {
     const maxTilt = (WAVES.maxTiltDegrees * Math.PI) / 180;
     const tilt = clamp(Math.atan(slope * WAVES.tiltGain), -maxTilt, maxTilt);
 
-    const centreY = h * MOTION.waterlineY + lift - boatH * 0.25;
-    const waterline = centreY + boatH / 2;
+    // The water, and where it crosses this boat.
+    //
+    // The drawing is hung so that its own waterline lands on the surface,
+    // whatever the crop happened to take in above or below the hull. What used
+    // to be here placed the boat a quarter of its *picture* above the water and
+    // called the bottom edge of the picture the waterline - which is a fact
+    // about the crop rectangle, not about the boat. Extraction crops tightly, so
+    // that came to 0.75 of the image every time whatever was drawn; a hull that
+    // finishes at 0.60 because the visitor drew lily pads under it was then hung
+    // a sixth of the picture clear of the water, and nothing was ever submerged.
+    const waterline = h * MOTION.waterlineY + lift;
+    const crossing = this.hull ? this.hull.waterline : FALLBACK_WATERLINE;
+    const centreY = waterline - (crossing - 0.5) * boatH;
 
     const delta = Math.max(0, Math.min(100, now - this.lastFrameAt));
     this.lastFrameAt = now;
@@ -359,12 +404,7 @@ export class Stage {
     // is chosen with the boat rather than assumed.
     const sculpted = this.sculpted;
 
-    if (sculpted) {
-      this.renderSculpt(lift, tilt, elapsed);
-      this.drawSculptReflection(centreX, waterline, boatW, boatH);
-    } else if (!this.modelReady) {
-      this.drawReflection(centreX, waterline, boatW, boatH, tilt, elapsed);
-    }
+    if (sculpted) this.renderSculpt(lift, tilt, elapsed);
 
     // The trail the boat has left. Behind it, so it belongs under the ripples
     // that are directly beneath the hull.
@@ -388,6 +428,25 @@ export class Stage {
       this.drawModel(centreX, centreY, boatW, boatH, tilt, elapsed);
     } else {
       this.drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
+    }
+
+    // The water, in front of the part of the boat that is in it.
+    //
+    // This is what makes the draft something you can see. Without it the hull is
+    // drawn opaque from top to bottom and sits on the surface like a sticker,
+    // however carefully it was placed. The boat is not altered to achieve it -
+    // nothing is cut off, faded or repainted - the water is simply drawn over
+    // the part of it that is under the water, which is what being in the water
+    // looks like.
+    this.submerge(waterline, centreY + boatH / 2, w, h);
+
+    // The reflection lies *on* the surface, so it goes over the water rather
+    // than under it - after the veil, not before. It used to be drawn first, and
+    // was then partly covered by the hull it was supposed to be a reflection of.
+    if (sculpted) {
+      this.drawSculptReflection(centreX, waterline, boatW, boatH);
+    } else if (!this.modelReady) {
+      this.drawReflection(centreX, waterline, boatW, boatH, tilt, elapsed);
     }
 
     // The water reacts to the blades whichever boat is on it. The positions
@@ -506,15 +565,84 @@ export class Stage {
   }
 
   drawBackground(w, h) {
+    this.paintBackground(this.ctx, w, h);
+  }
+
+  /**
+   * The background, drawn into any context at the size it covers the wall.
+   *
+   * Shared, because the water has to be painted twice: once behind everything,
+   * and again in front of whatever is under it. Both have to be the same frame
+   * at the same scale, or the surface would appear to jump at the waterline.
+   *
+   * @returns {boolean} whether there was a frame to draw
+   */
+  paintBackground(ctx, w, h) {
     const video = this.background;
-    if (!video || !video.videoWidth || video.readyState < 2) return;
+    if (!video || !video.videoWidth || video.readyState < 2) return false;
 
     // Cover: fill the canvas, crop the overflow.
     const scale = Math.max(w / video.videoWidth, h / video.videoHeight);
     const drawW = video.videoWidth * scale;
     const drawH = video.videoHeight * scale;
 
-    this.ctx.drawImage(video, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+    ctx.drawImage(video, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+    return true;
+  }
+
+  /**
+   * Puts the water back in front of everything below the waterline.
+   *
+   * A boat floats because part of it is under the surface, and something under
+   * the surface is seen through water. So the same frame of the lake that is
+   * behind the boat is drawn again over the part of it that is in the water,
+   * fading in from nothing at the waterline to `FLOAT.veil` at the deepest
+   * point.
+   *
+   * Doing it with the water itself rather than a wash of colour is what keeps
+   * this working on any background: nothing here knows or assumes what colour
+   * the lake is, and a hull under a green lake goes green while the same hull
+   * under a grey one goes grey. It also means the water's own movement plays
+   * over the submerged part, which is most of why it reads as being *in*
+   * something rather than behind a pane of glass.
+   *
+   * The drawing is untouched. Above the waterline it is exactly the scan; below
+   * it, it is the scan with water in front of it. Nothing is cut away, so there
+   * is no edge to go hard - the veil starts at zero, and the boat simply goes
+   * into the lake.
+   *
+   * The band runs the full width of the wall. Away from the boat that redraws
+   * the water over itself, which changes nothing and costs one composite, and it
+   * saves having to work out how far a rolling, pitching hull reaches sideways.
+   */
+  submerge(waterline, bottomY, w, h) {
+    const top = Math.max(0, Math.floor(waterline));
+    const depth = Math.ceil(Math.min(h, bottomY) - top);
+    if (depth < 2) return;
+
+    const buffer = this.bufferFor(w, depth, 'waterBuffer');
+    const bctx = buffer.getContext('2d');
+
+    bctx.clearRect(0, 0, w, depth);
+    bctx.save();
+    bctx.translate(0, -top);
+    const painted = this.paintBackground(bctx, w, h);
+    bctx.restore();
+    if (!painted) return;
+
+    // Rubbed away at the top and left almost whole at the bottom, so the water
+    // thickens with depth instead of arriving all at once along a line.
+    const fade = bctx.createLinearGradient(0, 0, 0, depth);
+    fade.addColorStop(0, 'rgba(0, 0, 0, 1)');
+    fade.addColorStop(1, `rgba(0, 0, 0, ${(1 - FLOAT.veil).toFixed(3)})`);
+
+    bctx.save();
+    bctx.globalCompositeOperation = 'destination-out';
+    bctx.fillStyle = fade;
+    bctx.fillRect(0, 0, w, depth);
+    bctx.restore();
+
+    this.ctx.drawImage(buffer, 0, top);
   }
 
   /**
@@ -821,18 +949,24 @@ export class Stage {
     ctx.restore();
   }
 
-  /** Reused between frames; only rebuilt when the area changes size. */
-  bufferFor(width, height) {
+  /**
+   * A scratch canvas of a given size, reused between frames.
+   *
+   * Kept per purpose - `slot` names which one - because the water band and an
+   * advertisement are different shapes and are both wanted every frame. One
+   * shared buffer would be thrown away and rebuilt twice a frame.
+   */
+  bufferFor(width, height, slot = 'adBuffer') {
     const w = Math.ceil(width);
     const h = Math.ceil(height);
 
-    if (!this.adBuffer || this.adBuffer.width !== w || this.adBuffer.height !== h) {
-      this.adBuffer = document.createElement('canvas');
-      this.adBuffer.width = w;
-      this.adBuffer.height = h;
+    if (!this[slot] || this[slot].width !== w || this[slot].height !== h) {
+      this[slot] = document.createElement('canvas');
+      this[slot].width = w;
+      this[slot].height = h;
     }
 
-    return this.adBuffer;
+    return this[slot];
   }
 
   /** The detected name, centred below the boat. */

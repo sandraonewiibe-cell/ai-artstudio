@@ -822,6 +822,43 @@ export const ANIMATE = {
   },
 };
 
+/**
+ * How the boat sits in the water.
+ *
+ * Where the water crosses a particular drawing is measured from that drawing -
+ * see waterline.js - so there is no position here, and nothing to set per boat.
+ * These are the two things that are the same for every boat: how deep one
+ * floats, and how strongly the water hides what is under it.
+ */
+export const FLOAT = {
+  /**
+   * How much of the hull is under water, as a fraction of its own height.
+   *
+   * Of the hull, not of the picture. The drawing usually has more in it than
+   * the boat - lily pads, motion lines, a signature - and measuring against all
+   * of that would sink whichever boat happened to be drawn with the most going
+   * on around it.
+   *
+   * A boat sitting too high looks like a sticker; too low and the sheer
+   * disappears and it reads as a log. A quarter is the middle of the range that
+   * looks right, and is what a laden hull actually shows.
+   */
+  draft: 0.25,
+
+  /**
+   * How much the water hides of what is under it, at its strongest.
+   *
+   * Not 1. Water is not paint: a hull just under the surface is dimmed and
+   * broken up by what is moving over it, and is still plainly there. Taking it
+   * to 1 would cut the boat off along a hard line, which is the scissor-cut
+   * look this exists to avoid.
+   *
+   * The veil fades in from nothing at the waterline down to this at the deepest
+   * point, so there is no edge anywhere - the boat simply goes into the water.
+   */
+  veil: 0.72,
+};
+
 export const WAVES = {
   // Two overlapping swells. Different lengths and speeds stop the surface
   // looking like a metronome.
