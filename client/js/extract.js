@@ -67,7 +67,7 @@ export function extractDrawing(pageCanvas) {
   const withCompany = keepDrawingCluster(usable, width, height);
   if (!withCompany.length) return null;
 
-  const remnants = markerRemnants(withCompany, labels, width, height);
+  const { remnants, footprint } = markerRemnants(withCompany, labels, width, height);
   const kept = withCompany.filter((c) => !remnants.has(c.label));
   if (!kept.length) return null;
 
@@ -109,12 +109,30 @@ export function extractDrawing(pageCanvas) {
   // band, the specks, the printed corner markers. The colour pass is told to
   // leave all of it alone, so nothing that has been removed can be painted
   // back on.
+  //
+  // A marker is banned by the ground it stands on, not by its ink.
+  //
+  // Listing its ink was not enough, and the reason is what a printed block
+  // actually looks like to this pipeline. Only the dark heart of each block
+  // clears the ink threshold; the softer green of its edges, and the paper in
+  // the gaps of the QR grid, never become components at all. So they were
+  // never in any list of things to leave alone - and being green, they are
+  // exactly what the colour pass is looking for. It bucketed them, closed the
+  // gaps between the blocks into one region, and painted a marker back into
+  // each corner of a drawing that had just been cleaned of them.
+  //
+  // The footprint is the whole area the marker occupies, so the pale parts are
+  // covered along with the dark. Pixels belonging to a component that was kept
+  // are never banned: a stroke crossing a corner is the visitor's, and it keeps
+  // its colour wherever it goes.
   const discarded = new Uint8Array(width * height);
   for (let i = 0; i < discarded.length; i += 1) {
-    if (labels[i] >= 0 && !selected.has(labels[i])) discarded[i] = 1;
+    const label = labels[i];
+    if (label >= 0 && selected.has(label)) continue;
+    if (label >= 0 || footprint[i]) discarded[i] = 1;
   }
 
-  const paint = paintedRegions(page, width, height, drawingBounds, discarded);
+  const paint = paintedRegions(page, width, height, drawingBounds, discarded, strokes);
   for (let i = 0; i < fill.length; i += 1) if (paint.mask[i]) fill[i] = 1;
 
   const base = { page, luma, strokes, width, height, reference };
@@ -208,12 +226,14 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
  * colour in them, so the pits take the colour of the crayon around them
  * instead of staying bare.
  *
+ * @param {Uint8Array} banned pixels the extraction has already thrown away
+ * @param {Uint8Array} strokes the ink of every component being kept
  * @returns {{mask: Uint8Array, region: Int32Array, colours: {r,g,b}[]}}
  *   mask   1 where a pixel belongs to a coloured-in area
  *   region which area, or -1
  *   colours the colour of each area
  */
-function paintedRegions(page, width, height, bounds, banned) {
+function paintedRegions(page, width, height, bounds, banned, strokes) {
   const { chromaThreshold } = EXTRACT.fill;
   const { closeRatio, minAreaRatio, hueBuckets } = EXTRACT.paint;
 
@@ -304,6 +324,30 @@ function paintedRegions(page, width, height, bounds, banned) {
       // every edge before any of this, so anything still touching the boundary
       // came from outside the sheet.
       .filter((c) => !touchesPageEdge(c, width, height))
+      // Not the printed template.
+      //
+      // Colour on its own does not make something the visitor's. A printed QR
+      // marker is a large, strongly coloured, tightly bounded area, and by every
+      // test above it looks exactly like a patch somebody coloured in - which is
+      // how a whole marker came through green and intact on a page where the ink
+      // stages had already discarded every last pixel of it.
+      //
+      // Two things give it away, and it takes both.
+      //
+      // Where it is: wholly inside a corner box, which is where the template is
+      // printed and where the extraction already accepts it may lose a mark that
+      // strays into one.
+      //
+      // What it is built on: marks the ink stages threw away, and none that they
+      // kept. Every one of them was looked at and judged not to be the drawing,
+      // so rebuilding the shape they made, in colour, undoes that.
+      //
+      // Neither half will do on its own. Position alone would take a lily
+      // somebody drew in the corner. Evidence alone was measured and cannot
+      // separate them: on a real scan the marker is drawn over 17% discarded ink
+      // and the visitor's own water over anything from 0.1% to 26%, so there is
+      // no share that tells the two apart. Together they are decisive.
+      .filter((c) => !isPrintedMarker(c, labels, strokes, banned, width, height))
       .forEach((c) => {
         const index = colours.length;
         let r = 0;
@@ -362,6 +406,39 @@ function paintedRegions(page, width, height, bounds, banned) {
   closeEdgePits(region, mask, colours.length, width, height, box, Math.max(8, radius));
 
   return { mask, region, colours };
+}
+
+/**
+ * True if a region of colour is a corner marker rather than something drawn.
+ *
+ * It has to be in a corner, and it has to be built on marks that were thrown
+ * away with none that were kept.
+ *
+ * The second half needs both of its own conditions, and each keeps the other
+ * honest. Discarded ink alone is too eager: a speck of grain dropped as noise
+ * can land anywhere, including in the middle of a hull somebody coloured in.
+ * Requiring kept ink alone is too strict - a crayon stroke laid down lightly
+ * never gets dark enough to be ink at all, so it has no marks of its own to
+ * point to, and demanding some deletes the water out of a drawing. Having no ink
+ * either way is the ordinary case for colour, and it is left alone.
+ */
+function isPrintedMarker(component, labels, strokes, banned, width, height) {
+  if (!strokes || !banned) return false;
+  if (!isInCorner(component, width, height)) return false;
+
+  let discarded = false;
+
+  for (let y = component.minY; y <= component.maxY; y += 1) {
+    for (let x = component.minX; x <= component.maxX; x += 1) {
+      const i = y * width + x;
+      if (labels[i] !== component.label) continue;
+
+      if (strokes[i]) return false;
+      if (banned[i]) discarded = true;
+    }
+  }
+
+  return discarded;
 }
 
 /**
@@ -1014,6 +1091,15 @@ const MARKER_BLOCK_GAP_RATIO = 0.012;
  * crosses out of it is the visitor's, however marker-like the piece inside the
  * corner looks - which is the safe way round: paper on the wall is a blemish, a
  * hole in somebody's boat is not.
+ *
+ * Two things come back, because a marker is two things. `remnants` is the ink
+ * to drop. `footprint` is the ground that ink stands on - the merged shape,
+ * gaps and all - which is what the later stages need in order to leave the rest
+ * of the marker alone. The pale green at a block's edge and the paper between
+ * the blocks are as much the printed template as the dark centres are, and
+ * neither of them is ink, so neither of them has a label to be listed by.
+ *
+ * @returns {{remnants: Set<number>, footprint: Uint8Array}}
  */
 function markerRemnants(components, labels, width, height) {
   const present = new Set(components.map((c) => c.label));
@@ -1033,14 +1119,14 @@ function markerRemnants(components, labels, width, height) {
     }
   }
 
-  const { components: blobs, labels: blobLabels } = labelComponents(
-    growBy(corners, width, height, gap), width, height
-  );
+  const merged = growBy(corners, width, height, gap);
+  const { components: blobs, labels: blobLabels } = labelComponents(merged, width, height);
 
-  const markers = new Set(
-    blobs.filter((b) => isMarkerRemnant(b, width, height)).map((b) => b.label)
-  );
-  if (!markers.size) return new Set();
+  const found = blobs.filter((b) => isMarkerRemnant(b, width, height));
+  const markers = new Set(found.map((b) => b.label));
+
+  const footprint = markerFootprint(found, width, height);
+  if (!markers.size) return { remnants: new Set(), footprint };
 
   const inCorner = new Set(
     components.filter((c) => isInCorner(c, width, height)).map((c) => c.label)
@@ -1053,7 +1139,49 @@ function markerRemnants(components, labels, width, height) {
     }
   }
 
-  return remnants;
+  return { remnants, footprint };
+}
+
+/**
+ * The ground a marker stands on: the square it occupies, per corner.
+ *
+ * Not the shape of its ink. A printed marker arrives here as several pieces -
+ * the dense block of data and, set apart from it by a quiet zone wider than any
+ * gap between the blocks, the three little squares that square it up. Between
+ * and around those pieces is printed paper: the quiet zone, the light modules,
+ * and the soft green fringe where a block's edge fades out.
+ *
+ * None of that is ink. It never gets dark enough to clear the threshold, so it
+ * has no component and no label, and a footprint traced round the ink leaves it
+ * behind - which is precisely the part the colour pass then finds. It is green,
+ * it closes into one region, and a corner of the printed template goes up on
+ * the wall in place of the marker that was so carefully removed.
+ *
+ * So the pieces of one corner are put back together into the one thing they
+ * were, and the whole of it is spoken for. Every piece has already been judged
+ * to lie wholly inside its corner box, so their union does too - the square can
+ * never reach out into the drawing.
+ */
+function markerFootprint(found, width, height) {
+  const footprint = new Uint8Array(width * height);
+
+  const zoneX = width * EXTRACT.cornerZoneRatio;
+  const zoneY = height * EXTRACT.cornerZoneRatio;
+  const corners = new Map();
+
+  for (const blob of found) {
+    const key = `${blob.maxX < zoneX ? 'l' : 'r'}${blob.maxY < zoneY ? 't' : 'b'}`;
+    const box = corners.get(key);
+    corners.set(key, box ? mergeBox(box, boxOf(blob)) : boxOf(blob));
+  }
+
+  for (const box of corners.values()) {
+    for (let y = box.minY; y <= box.maxY; y += 1) {
+      for (let x = box.minX; x <= box.maxX; x += 1) footprint[y * width + x] = 1;
+    }
+  }
+
+  return footprint;
 }
 
 function isMarkerRemnant(c, width, height) {
