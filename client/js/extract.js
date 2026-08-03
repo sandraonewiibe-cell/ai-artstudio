@@ -67,7 +67,8 @@ export function extractDrawing(pageCanvas) {
   const withCompany = keepDrawingCluster(usable, width, height);
   if (!withCompany.length) return null;
 
-  const kept = withCompany.filter((c) => !isMarkerRemnant(c, width, height));
+  const remnants = markerRemnants(withCompany, labels, width, height);
+  const kept = withCompany.filter((c) => !remnants.has(c.label));
   if (!kept.length) return null;
 
   const selected = new Set(kept.map((c) => c.label));
@@ -104,7 +105,16 @@ export function extractDrawing(pageCanvas) {
   // crayon is treated as coloured too. These count as part of the drawing
   // whether or not the boat encloses them - somebody who colours past the
   // outline still coloured it.
-  const paint = paintedRegions(page, width, height, drawingBounds);
+  // Everything the stages above decided was not the drawing: the page-edge
+  // band, the specks, the printed corner markers. The colour pass is told to
+  // leave all of it alone, so nothing that has been removed can be painted
+  // back on.
+  const discarded = new Uint8Array(width * height);
+  for (let i = 0; i < discarded.length; i += 1) {
+    if (labels[i] >= 0 && !selected.has(labels[i])) discarded[i] = 1;
+  }
+
+  const paint = paintedRegions(page, width, height, drawingBounds, discarded);
   for (let i = 0; i < fill.length; i += 1) if (paint.mask[i]) fill[i] = 1;
 
   const base = { page, luma, strokes, width, height, reference };
@@ -203,7 +213,7 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
  *   region which area, or -1
  *   colours the colour of each area
  */
-function paintedRegions(page, width, height, bounds) {
+function paintedRegions(page, width, height, bounds, banned) {
   const { chromaThreshold } = EXTRACT.fill;
   const { closeRatio, minAreaRatio, hueBuckets } = EXTRACT.paint;
 
@@ -233,6 +243,14 @@ function paintedRegions(page, width, height, bounds) {
   for (let y = box.minY; y <= box.maxY; y += 1) {
     for (let x = box.minX; x <= box.maxX; x += 1) {
       const i = y * width + x;
+
+      // Never anything the extraction has already thrown away. A printed corner
+      // marker is a coloured shape like any other, so the colour pass used to
+      // hand back all four of them however carefully they had just been
+      // removed - the drawing was cleaned, and then the markers were painted
+      // straight back onto it.
+      if (banned && banned[i]) continue;
+
       const r = page.data[i * 4];
       const g = page.data[i * 4 + 1];
       const b = page.data[i * 4 + 2];
@@ -960,9 +978,92 @@ function boxDistance(a, b) {
  * "Entirely inside" matters - a boat drawn towards one corner still extends
  * out of the box and is kept.
  */
+/**
+ * How far apart the blocks of a printed marker are, as a fraction of the page's
+ * shorter side.
+ *
+ * Not a tuning knob: it is the quiet zone of the printed QR block, measured off
+ * the rectified page. The blocks of one marker are this far apart; the drawing
+ * and the marker are much further apart than this, which is what keeps the two
+ * from being merged into one thing below.
+ */
+const MARKER_BLOCK_GAP_RATIO = 0.012;
+
+/**
+ * Which components are pieces of a printed corner marker.
+ *
+ * A QR block is not one shape. It is a grid of separate squares, so labelling
+ * hands back thirty or forty little components per corner, and every one of
+ * them is the size of a dot on an 'i'. Judging them one at a time cannot work:
+ * the size floor that protects a genuine small mark in a corner protects every
+ * fragment of every marker along with it, which is why whole markers were
+ * arriving on the wall.
+ *
+ * So they are judged together. The ink is grown by the gap between the printed
+ * blocks, which merges the fragments of one marker into the single square shape
+ * a marker actually is, and it is that shape which is measured. A marker is
+ * then plainly a marker - large, and wholly inside a corner - while a real mark
+ * in a corner has nothing to merge with and stays as small as it was.
+ *
+ * The merging happens inside the corners and nowhere else. A drawing that runs
+ * up to a corner would otherwise be merged into the marker beside it, and the
+ * two together are no longer marker-shaped, so the marker survived by holding
+ * on to the boat. Confined to the corner, it has only itself to merge with.
+ *
+ * Then only components wholly inside the corner are dropped. A stroke that
+ * crosses out of it is the visitor's, however marker-like the piece inside the
+ * corner looks - which is the safe way round: paper on the wall is a blemish, a
+ * hole in somebody's boat is not.
+ */
+function markerRemnants(components, labels, width, height) {
+  const present = new Set(components.map((c) => c.label));
+  const ink = buildStrokeMask(labels, present, width, height);
+  const gap = Math.max(2, Math.round(Math.min(width, height) * MARKER_BLOCK_GAP_RATIO));
+
+  const zoneX = width * EXTRACT.cornerZoneRatio;
+  const zoneY = height * EXTRACT.cornerZoneRatio;
+
+  const corners = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    if (!(y < zoneY || y > height - zoneY)) continue;
+    for (let x = 0; x < width; x += 1) {
+      if (!(x < zoneX || x > width - zoneX)) continue;
+      const i = y * width + x;
+      if (ink[i]) corners[i] = 1;
+    }
+  }
+
+  const { components: blobs, labels: blobLabels } = labelComponents(
+    growBy(corners, width, height, gap), width, height
+  );
+
+  const markers = new Set(
+    blobs.filter((b) => isMarkerRemnant(b, width, height)).map((b) => b.label)
+  );
+  if (!markers.size) return new Set();
+
+  const inCorner = new Set(
+    components.filter((c) => isInCorner(c, width, height)).map((c) => c.label)
+  );
+
+  const remnants = new Set();
+  for (let i = 0; i < corners.length; i += 1) {
+    if (corners[i] && markers.has(blobLabels[i]) && inCorner.has(labels[i])) {
+      remnants.add(labels[i]);
+    }
+  }
+
+  return remnants;
+}
+
 function isMarkerRemnant(c, width, height) {
   if (c.area / (width * height) < EXTRACT.markerRemnantMinAreaRatio) return false;
 
+  return isInCorner(c, width, height);
+}
+
+/** True if a shape lies wholly inside one of the four corner boxes. */
+function isInCorner(c, width, height) {
   const zoneX = width * EXTRACT.cornerZoneRatio;
   const zoneY = height * EXTRACT.cornerZoneRatio;
 
