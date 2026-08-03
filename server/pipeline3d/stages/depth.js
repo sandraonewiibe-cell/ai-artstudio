@@ -54,7 +54,10 @@ module.exports = {
       return null;
     }
 
-    const { alphaThreshold, profile, thickness, maxWidth } = config.depth;
+    const {
+      alphaThreshold, profile, thickness, maxWidth,
+      wallRatio, minWallPx, interiorFloor, thinFloor,
+    } = config.depth;
 
     // Background removal has already decoded this PNG. Decoding it again would
     // be a tenth of a second spent arriving at the same pixels.
@@ -82,12 +85,51 @@ module.exports = {
       return null;
     }
 
-    // Normalised, then curved. An exponent below one rounds off quickly at the
-    // rim and flattens across the middle, which reads as a solid with a soft
-    // edge rather than a cone or a tent.
+    // A wall that rises, and an inside that falls away behind it.
+    //
+    // The old shape was a single curve from rim to middle, so the deepest point
+    // of a hull was also its highest and an outlined boat came out a lozenge.
+    // Read in two zones instead: near the outline the surface climbs to a rim,
+    // and past that it settles back towards a floor. On a drawn hull that is
+    // gunwales and an interior; the shape of both comes from the distance field
+    // and nothing else, so a flower and a house get the same treatment and come
+    // out as sensibly as they did before.
+    //
+    // Worked in pixels rather than in fractions of the deepest point, which is
+    // what keeps a thin shape solid. A paddle blade fifteen pixels across never
+    // reaches the far side of its own wall, so it never hollows - it simply
+    // comes out thinner than the hull, which is what it is.
+    const wallPx = Math.max(minWallPx, (deepest / ORTHOGONAL) * wallRatio);
+    const deepestPx = deepest / ORTHOGONAL;
+
     const values = new Float32Array(distance.length);
+
     for (let i = 0; i < distance.length; i += 1) {
-      values[i] = distance[i] > 0 ? Math.pow(distance[i] / deepest, profile) : 0;
+      if (!distance[i]) continue;
+
+      const px = distance[i] / ORTHOGONAL;
+      let height;
+
+      if (px <= wallPx) {
+        // Climbing the wall. Smoothstep rather than a straight ramp, so the
+        // side is curved where it meets the water and where it meets the rim,
+        // instead of the flat bevel a vertical extrusion gives.
+        const t = px / wallPx;
+        height = t * t * (3 - 2 * t);
+      } else if (deepestPx > wallPx) {
+        // Inside. Falls from the rim towards the floor, and how far it gets
+        // depends on how much room there is - a narrow part of the shape has
+        // barely left its own wall and stays nearly full, which is what makes
+        // a bow and stern taper to a point rather than opening out.
+        const t = Math.min(1, (px - wallPx) / (deepestPx - wallPx));
+        height = 1 - (1 - interiorFloor) * (t * t * (3 - 2 * t));
+      } else {
+        height = 1;
+      }
+
+      // Nothing drawn is left with no thickness at all. A single pencil line is
+      // still something the child put on the page.
+      values[i] = Math.max(thinFloor, Math.pow(height, profile));
     }
 
     context.log(

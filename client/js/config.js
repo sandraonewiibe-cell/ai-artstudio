@@ -111,6 +111,13 @@ export const EXTRACT = {
   // away drawings that merely reach towards the edge.
   borderSlackPx: 1,
 
+  // How far in from the rectified page edge still counts as outside the sheet,
+  // for a coloured area. This is the table showing past a corner the detection
+  // missed by a few pixels - a wooden surface arrived as a large brown shape
+  // beside the boat, because a colour was not subject to the rule that already
+  // dropped ink at the border.
+  pageEdgeSlackRatio: 0.012,
+
   // Absolute noise floor - below this a component is sensor grain, nothing more.
   // Deliberately low, because the dot of an 'i' and the tail of a 't' are tiny
   // and dropping them mangles handwriting.
@@ -127,6 +134,12 @@ export const EXTRACT = {
   // sits on its own in the margin.
   clusterReachRatio: 0.12,
 
+  // ...but only a component this big may extend the chain. Anything smaller can
+  // join the drawing and cannot lead the search anywhere: that is what stops a
+  // trail of grain walking the cluster across the page and pulling the paper,
+  // the page edge and the printed markers in behind it.
+  clusterBridgeRatio: 0.0002,
+
   // Last line of defence against a marker surviving the crop: any component
   // lying *entirely* inside one of these corner boxes is discarded.
   //
@@ -134,11 +147,24 @@ export const EXTRACT = {
   // sliver of one that survives a slightly-too-tight crop is a thin strip, and
   // a shape test would let it through. The trade-off is that a visitor who
   // writes something wholly inside a corner box loses it - keep the zone small.
-  cornerZoneRatio: 0.14,
+  // Measured rather than guessed: on a 1080x744 page the printed markers come
+  // out about 147x105, and a zone of 0.14 is 151x104 - so they overshoot it
+  // vertically by around twenty pixels and survive into the drawing. The server
+  // side already had to use 0.2 to catch the same blocks, and this is the same
+  // rule applied where the extraction actually happens.
+  //
+  // Still "wholly inside", which is what keeps it safe: a drawing that merely
+  // reaches towards a corner has a bounding box that leaves it again.
+  cornerZoneRatio: 0.2,
   markerRemnantMinAreaRatio: 0.00015,
 
   // Padding around the extracted drawing, as a fraction of its longest edge.
-  paddingRatio: 0.04,
+  // A small fixed margin round the drawing, in pixels of the rectified page,
+  // with the ratio only used to keep a very small sketch from being cropped to
+  // its own outline. Capped, so a large drawing does not carry a large border.
+  paddingRatio: 0.01,
+  paddingPx: 12,
+  paddingMaxPx: 20,
 
   /**
    * Telling ink from paper.
@@ -697,6 +723,18 @@ export const GLB = {
   // A slow nod on top, so it is never rigid.
   nodDegrees: 3,
   nodPeriodMs: 7300,
+
+  /**
+   * How far the heading wanders, and how slowly.
+   *
+   * Small: a boat left alone on water does not hold a heading, but it does not
+   * spin either. Two or three degrees is the difference between a model sitting
+   * on the water and one glued to it. The period is long, and is beaten against
+   * a second wave that does not divide into it, so the drift never repeats on a
+   * count anybody could follow.
+   */
+  yawDegrees: 2.5,
+  yawPeriodMs: 11000,
 
   // Lighting. The environment does the reflections; the sun gives it a
   // direction to be lit from.

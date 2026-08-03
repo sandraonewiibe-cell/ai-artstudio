@@ -175,8 +175,18 @@ export class BoatGL {
     const nod =
       Math.sin((elapsed / GLB.nodPeriodMs) * Math.PI * 2) * ((GLB.nodDegrees * Math.PI) / 180);
 
+    // A slow wander either side of where it is pointing.
+    //
+    // Two sine waves of periods that do not divide into one another, so the
+    // drift never repeats on a beat somebody could count. A boat left alone on
+    // water does not hold a heading, and one that does reads as a prop.
+    const drift =
+      (Math.sin((elapsed / GLB.yawPeriodMs) * Math.PI * 2) * 0.65 +
+        Math.sin((elapsed / (GLB.yawPeriodMs * 0.41)) * Math.PI * 2) * 0.35) *
+      ((GLB.yawDegrees * Math.PI) / 180);
+
     this.pivot.position.y = heave;
-    this.pivot.rotation.set(nod, GLB.baseYaw, roll * GLB.roll);
+    this.pivot.rotation.set(nod, GLB.baseYaw + drift, roll * GLB.roll);
 
     // The paddles run on the same clock as the splashes, so a blade is entering
     // the water at the moment the water answers it.

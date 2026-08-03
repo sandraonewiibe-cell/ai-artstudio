@@ -272,6 +272,19 @@ function paintedRegions(page, width, height, bounds) {
 
     components
       .filter((c) => c.area >= floor)
+      // Not the table.
+      //
+      // A coloured area running off the edge of the rectified page is the
+      // surface the sheet was lying on, showing past a corner the detection
+      // missed by a few pixels. Ink reaching the border is already dropped for
+      // exactly this reason, but a colour region was not - so a wooden table
+      // came through as a large brown shape floating beside the boat, being a
+      // colour rather than a stroke.
+      //
+      // A drawing does not run off the page: there is a margin trimmed from
+      // every edge before any of this, so anything still touching the boundary
+      // came from outside the sheet.
+      .filter((c) => !touchesPageEdge(c, width, height))
       .forEach((c) => {
         const index = colours.length;
         let r = 0;
@@ -444,8 +457,15 @@ function padBox(bounds, by, width, height) {
 
 /** Crop box for a set of bounds, with breathing room, clamped to the page. */
 function cropRect(bounds, width, height) {
-  const pad = Math.round(
-    Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * EXTRACT.paddingRatio
+  // A fixed margin in pixels, capped, rather than a share of the drawing. A
+  // share meant a big sketch got a big empty border - forty-odd pixels of
+  // nothing on every side, which the mesh then has to carry.
+  const pad = Math.min(
+    EXTRACT.paddingMaxPx,
+    Math.max(
+      EXTRACT.paddingPx,
+      Math.round(Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * EXTRACT.paddingRatio)
+    )
   );
 
   return {
@@ -476,29 +496,55 @@ function keepDrawingCluster(components, width, height) {
   const reach = Math.hypot(width, height) * EXTRACT.clusterReachRatio;
   const sorted = [...candidates].sort((a, b) => b.area - a.area);
 
-  const cluster = new Set([sorted[0]]);
-  let changed = true;
+  // Only something substantial may extend the cluster.
+  //
+  // Growing from every member equally is single-linkage clustering, and it runs
+  // away: a speck of grain six pixels across is within reach of the boat, the
+  // next speck is within reach of that one, and the chain walks off across the
+  // sheet. Measured on real scans it kept 554 components spanning the whole
+  // page, which is how the paper and the printed markers ended up inside the
+  // crop - not because either was mistaken for a drawing, but because a trail
+  // of dust led to them.
+  //
+  // So a small mark may still *join* - the dot of an 'i' and a ripple stroke
+  // both do - but only a substantial one may pull anything further in. Dust can
+  // arrive at the party and cannot invite anyone.
+  const bridge = Math.max(floor, width * height * EXTRACT.clusterBridgeRatio);
 
-  // Repeat until nothing new joins: a component that has just joined can bring
-  // others within reach, which is what lets a chain of text lines hang
-  // together.
-  while (changed) {
-    changed = false;
+  const cluster = new Set([sorted[0]]);
+  const frontier = [sorted[0]];
+
+  while (frontier.length) {
+    const member = frontier.pop();
+    const box = boxOf(member);
 
     for (const candidate of sorted) {
       if (cluster.has(candidate)) continue;
+      if (boxDistance(boxOf(candidate), box) > reach) continue;
 
-      for (const member of cluster) {
-        if (boxDistance(boxOf(candidate), boxOf(member)) <= reach) {
-          cluster.add(candidate);
-          changed = true;
-          break;
-        }
-      }
+      cluster.add(candidate);
+      if (candidate.area >= bridge) frontier.push(candidate);
     }
   }
 
   return [...cluster];
+}
+
+/**
+ * Whether a component runs off the edge of the rectified page.
+ *
+ * The slack is what the perspective correction can be out by: a corner missed
+ * by a few pixels leaves a thin band of whatever the sheet was lying on.
+ */
+function touchesPageEdge(component, width, height) {
+  const slack = Math.max(2, Math.round(Math.min(width, height) * EXTRACT.pageEdgeSlackRatio));
+
+  return (
+    component.minX <= slack ||
+    component.minY <= slack ||
+    component.maxX >= width - 1 - slack ||
+    component.maxY >= height - 1 - slack
+  );
 }
 
 /** 1 where the pixel belongs to a component we are keeping. */

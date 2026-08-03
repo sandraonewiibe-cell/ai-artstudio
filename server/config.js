@@ -238,7 +238,7 @@ module.exports = {
      * A configured plugin is announced either way: asking for one is already the
      * decision this setting is about.
      */
-    publish: process.env.MESH_PUBLISH === 'true',
+    publish: process.env.MESH_PUBLISH !== 'false',
   },
 
   /**
@@ -307,6 +307,32 @@ module.exports = {
 
     // Total thickness at the deepest point, against a model one unit across.
     thickness: Number(process.env.DEPTH_THICKNESS || 0.22),
+
+    /**
+     * How far in from the outline the surface is still climbing.
+     *
+     * The wall. Past it the surface falls away towards the floor, which on a
+     * drawn hull is the difference between gunwales with an interior and a
+     * solid lozenge. As a fraction of the shape's own deepest point, so a big
+     * hull gets a proportionate wall.
+     */
+    wallRatio: Number(process.env.DEPTH_WALL_RATIO || 0.28),
+
+    /**
+     * ...but never thinner than this, in pixels of the analysed field.
+     *
+     * This is what keeps a thin shape solid. A paddle blade never reaches the
+     * far side of its own wall, so it never hollows out - it just comes out
+     * thinner than the hull, which is what it is.
+     */
+    minWallPx: num(process.env.DEPTH_MIN_WALL_PX, 14),
+
+    // How far the inside drops below the rim. 1 would be no hollow at all.
+    interiorFloor: Number(process.env.DEPTH_INTERIOR_FLOOR || 0.38),
+
+    // Nothing drawn is left with no thickness. A single pencil line is still
+    // something the child put on the page.
+    thinFloor: Number(process.env.DEPTH_THIN_FLOOR || 0.1),
 
     /**
      * The widest the height field is worked out at.
