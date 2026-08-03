@@ -59,7 +59,7 @@ export function measureHull(image) {
 
   const { mask, width, height } = source;
 
-  const { components } = labelComponents(mask, width, height);
+  const { components, labels } = labelComponents(mask, width, height);
   if (!components.length) return null;
 
   // The boat. Everything else in the picture was drawn around it.
@@ -71,13 +71,54 @@ export function measureHull(image) {
   const bottom = (hull.maxY + 1) / height;
 
   const draft = clamp(FLOAT.draft, 0, 0.9);
+  const waterline = bottom - draft * (bottom - top);
 
   return {
     top,
     bottom,
     draft,
-    waterline: bottom - draft * (bottom - top),
+    waterline,
+    beam: beamAt(waterline, hull, labels, width, height),
   };
+}
+
+/**
+ * How wide the boat is where it meets the water.
+ *
+ * Its beam at the waterline, not the width of the picture and not the widest
+ * the hull ever gets. This is the footprint the boat actually rests on, which is
+ * what anything sitting on the surface under it has to follow - a shadow cast
+ * straight down, or the water pushed aside as it goes.
+ *
+ * A few rows either side of the waterline are taken together rather than the one
+ * row exactly on it. A hand-drawn hull can be pinched to nothing at the very
+ * row the waterline falls on, or have a gap in its outline there, and a beam
+ * measured off that one row would flicker as the boat rides up and down.
+ *
+ * @returns {{left: number, right: number}} fractions of the image's width
+ */
+function beamAt(waterline, hull, labels, width, height) {
+  const centre = Math.round(waterline * height);
+  const reach = Math.max(1, Math.round(height * 0.02));
+
+  let min = width;
+  let max = -1;
+
+  for (let y = centre - reach; y <= centre + reach; y += 1) {
+    if (y < 0 || y >= height) continue;
+
+    for (let x = 0; x < width; x += 1) {
+      if (labels[y * width + x] !== hull.label) continue;
+      if (x < min) min = x;
+      if (x > max) max = x;
+    }
+  }
+
+  // Nothing of the hull at the waterline at all - an outline open at the bottom,
+  // or a boat drawn as a thin crescent. Its full width is the honest answer.
+  if (max < min) return { left: hull.minX / width, right: (hull.maxX + 1) / width };
+
+  return { left: min / width, right: (max + 1) / width };
 }
 
 /**

@@ -856,6 +856,38 @@ export const FLOAT = {
    * point, so there is no edge anywhere - the boat simply goes into the water.
    */
   veil: 0.72,
+
+  /**
+   * The shadow the boat casts on the water right under it.
+   *
+   * Nothing here is a position. The shadow follows the boat's beam - how wide
+   * the hull is where it meets the water, measured from the drawing - so it fits
+   * whatever was drawn without being told anything about it.
+   */
+  shadow: {
+    // How far the water darkens under the middle of the hull. Low: this is a
+    // cue the eye is meant to read without ever looking at it, and a shadow you
+    // notice is a grey ellipse someone has drawn on a lake.
+    opacity: 0.34,
+
+    // How far across the shadow spreads, against the boat's beam. Wider than
+    // the hull, because a shadow on water is diffused by the surface and by
+    // every wave crossing it.
+    widthOfBeam: 1.15,
+
+    // ...and how deep it is against that width. Flat, because it is lying on
+    // the water and being seen at a glancing angle.
+    height: 0.16,
+
+    // How far below the waterline its centre sits, as a share of its own
+    // height. A little under, so it reads as being cast down onto the surface
+    // rather than ringing the hull.
+    dropRatio: 0.55,
+
+    // Softened past what the gradient alone gives. A contact shadow with a
+    // discernible edge anywhere on it stops being a shadow.
+    blurPx: 12,
+  },
 };
 
 export const WAVES = {

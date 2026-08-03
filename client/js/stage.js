@@ -404,6 +404,20 @@ export class Stage {
     // is chosen with the boat rather than assumed.
     const sculpted = this.sculpted;
 
+    // Where the bottom of the hull is on the wall. The shadow hangs off it, and
+    // the deepest water the boat displaces is there rather than at the surface.
+    const keelY = centreY - boatH / 2 + (this.hull ? this.hull.bottom : 1) * boatH;
+    const shadow = { centreX, boatW, tilt, keelY };
+
+    // The boat's shadow on the water, before the boat goes on top of it.
+    //
+    // Before, because a shadow falls on the water and not on the boat. Drawn
+    // afterwards it multiplied over the hull as well and darkened the visitor's
+    // own drawing, which is the one thing on the wall that may never be altered.
+    // Under the boat it is hidden by the boat, and what shows is what falls
+    // beyond it - which is all a contact shadow ever is.
+    this.drawContactShadow(this.ctx, shadow, 0);
+
     if (sculpted) this.renderSculpt(lift, tilt, elapsed);
 
     // The trail the boat has left. Behind it, so it belongs under the ripples
@@ -438,7 +452,7 @@ export class Stage {
     // nothing is cut off, faded or repainted - the water is simply drawn over
     // the part of it that is under the water, which is what being in the water
     // looks like.
-    this.submerge(waterline, centreY + boatH / 2, w, h);
+    this.submerge(waterline, centreY + boatH / 2, w, h, shadow);
 
     // The reflection lies *on* the surface, so it goes over the water rather
     // than under it - after the veil, not before. It used to be drawn first, and
@@ -614,7 +628,7 @@ export class Stage {
    * the water over itself, which changes nothing and costs one composite, and it
    * saves having to work out how far a rolling, pitching hull reaches sideways.
    */
-  submerge(waterline, bottomY, w, h) {
+  submerge(waterline, bottomY, w, h, shadow) {
     const top = Math.max(0, Math.floor(waterline));
     const depth = Math.ceil(Math.min(h, bottomY) - top);
     if (depth < 2) return;
@@ -628,6 +642,12 @@ export class Stage {
     const painted = this.paintBackground(bctx, w, h);
     bctx.restore();
     if (!painted) return;
+
+    // The water carries the boat's shadow here too. This band is drawn over
+    // ground the shadow has already been laid on, so without it the water in
+    // front of the hull would be the one patch of lake with no shadow in it -
+    // a bright stripe cut across the middle of it at the waterline.
+    if (shadow) this.drawContactShadow(bctx, shadow, -top);
 
     // Rubbed away at the top and left almost whole at the bottom, so the water
     // thickens with depth instead of arriving all at once along a line.
@@ -680,6 +700,67 @@ export class Stage {
   drawSculpt(centreX, centreY, boatW, boatH) {
     const size = Math.max(boatW, boatH) * GLB.cover;
     this.ctx.drawImage(this.gl.canvas, centreX - size / 2, centreY - size / 2, size, size);
+  }
+
+  /**
+   * The shadow the boat casts on the water immediately under it.
+   *
+   * Small and dark and soft, and hardly noticed - which is the point. Without
+   * one a boat and the water it is on are two pictures that happen to overlap;
+   * with one they are in the same place. It is the cheapest cue there is that
+   * something is resting on something else, and the eye reads it without ever
+   * looking at it.
+   *
+   * It follows the boat's beam - how wide the hull is where it meets the water,
+   * measured from the drawing - rather than the width of the picture, so a
+   * narrow canoe gets a narrow shadow and a broad one a broad shadow, and the
+   * lily pads a visitor drew out to the edges of the page do not stretch it
+   * across the lake.
+   *
+   * Multiplied onto the water rather than painted over it, so what shows is the
+   * lake going darker. Painting grey over it would put a grey shape on the water
+   * that stays grey however bright or dark the footage under it is, and a
+   * background nobody has seen yet is exactly the case this has to survive.
+   *
+   * Softened at both ends: a gradient that never reaches its own edge, and a
+   * blur over the top of that. A contact shadow with an edge anywhere on it is
+   * an ellipse drawn on a lake, which is the same mistake the old ripples made.
+   */
+  drawContactShadow(ctx, { centreX, boatW, tilt, keelY }, offsetY) {
+    if (!this.hull || !FLOAT.shadow.opacity) return;
+
+    const { opacity, widthOfBeam, height: heightRatio, blurPx, dropRatio } = FLOAT.shadow;
+
+    const { left, right } = this.hull.beam;
+    const beam = Math.max(0, right - left) * boatW;
+    if (beam < 8) return;
+
+    // The beam's own centre, which is not the middle of the picture: a boat
+    // drawn towards one side of the page casts its shadow under itself.
+    const offset = ((left + right) / 2 - 0.5) * boatW;
+
+    const rx = (beam * widthOfBeam) / 2;
+    const ry = Math.max(2, rx * heightRatio);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.filter = `blur(${blurPx.toFixed(1)}px)`;
+    ctx.translate(centreX + offset, keelY + ry * dropRatio + offsetY);
+    ctx.rotate(tilt);
+    ctx.scale(1, ry / rx);
+
+    // Darkest under the middle of the hull and gone before the edge, so there is
+    // no rim anywhere.
+    const shade = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    shade.addColorStop(0, `rgba(0, 0, 0, ${opacity})`);
+    shade.addColorStop(0.55, `rgba(0, 0, 0, ${(opacity * 0.55).toFixed(3)})`);
+    shade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   /**
