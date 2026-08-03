@@ -238,7 +238,7 @@ module.exports = {
      * A configured plugin is announced either way: asking for one is already the
      * decision this setting is about.
      */
-    publish: process.env.MESH_PUBLISH !== 'false',
+    publish: process.env.MESH_PUBLISH === 'true',
   },
 
   /**
