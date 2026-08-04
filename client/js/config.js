@@ -89,6 +89,46 @@ export const MARKERS = {
   maskOverscan: 1.35,
 };
 
+/**
+ * The button that pauses and resumes scanning.
+ *
+ * The kiosk is operated with a small bluetooth remote rather than a keyboard,
+ * and what one of those sends when a button is pressed depends on the remote and
+ * on which of its modes it is in. Some report a letter; some report only a
+ * legacy key code with the key itself left as 'Unidentified'; some are not
+ * keyboards at all and turn up as gamepads.
+ *
+ * So the answer is not hard-coded. Anything that arrives and is not listed is
+ * logged with everything that identifies it - open the scanner screen's console,
+ * press the button once, and it will say exactly what to add here.
+ */
+export const REMOTE = {
+  // Matched against `event.key`, case-insensitively. The keyboard's own A.
+  pauseKeys: ['a'],
+
+  // ...against `event.code`, for a device that reports the physical key but no
+  // character. Case-insensitive.
+  pauseCodes: ['keya'],
+
+  // ...and against the legacy `event.keyCode`, which is all some remotes fill
+  // in. 65 is A.
+  pauseKeyCodes: [65],
+
+  // Whether a remote that presents itself as a gamepad is listened to. Such a
+  // remote raises no key events at all, so without this nothing it does can be
+  // heard.
+  gamepad: true,
+
+  // Which of its buttons count. Empty means any of them, which is what you want
+  // for a remote whose only job here is this - and what makes it work without
+  // knowing which button is which.
+  gamepadButtons: [],
+
+  // Log every press that was not recognised, so an unknown remote can be
+  // identified from the console in one press. Worth leaving on.
+  logInput: true,
+};
+
 export const PAGE = {
   // Longest edge of the rectified drawing area, in pixels. The other edge
   // follows the sheet's own proportions as measured from the markers.

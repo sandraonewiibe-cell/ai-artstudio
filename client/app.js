@@ -4,6 +4,7 @@ import { PaperScanner } from './js/detector.js';
 import { capturePage } from './js/capture.js';
 import { extractDrawing } from './js/extract.js';
 import { createSession, waitForSession } from './js/api.js';
+import { onPauseRequest } from './js/remote.js';
 
 /**
  * Screen 1 - the scanner.
@@ -296,15 +297,11 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) keepAwake();
 });
 
-// A toggles automatic scanning. Modifier combinations are left alone so
-// Ctrl+A and friends still behave normally.
-document.addEventListener('keydown', (event) => {
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key !== 'a' && event.key !== 'A') return;
-
-  event.preventDefault();
-  setScanningEnabled(!scanningEnabled);
-});
+// Pauses and resumes automatic scanning: A on a keyboard, or the button on the
+// bluetooth remote the kiosk is actually operated with - which may arrive as a
+// key, as a legacy key code, or as a gamepad button, depending on the remote.
+// See remote.js.
+onPauseRequest(() => setScanningEnabled(!scanningEnabled));
 
 // --- start ------------------------------------------------------------------
 
