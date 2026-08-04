@@ -103,6 +103,21 @@ export const MARKERS = {
  * press the button once, and it will say exactly what to add here.
  */
 export const REMOTE = {
+  /**
+   * Whether a left click anywhere pauses and resumes scanning.
+   *
+   * On, because this is what the remote actually sends. These remotes are
+   * usually left in mouse mode, where the button is a left click and no key is
+   * sent at all - so listening only for a letter was listening for something
+   * that never arrived.
+   *
+   * Anywhere on the screen, because the scanner has nothing on it to aim at and
+   * a remote in mouse mode leaves its cursor where it last was. Turn this off
+   * if the kiosk is ever run on a touchscreen the public can reach, where a
+   * stray tap would pause it.
+   */
+  leftClick: true,
+
   // Matched against `event.key`, case-insensitively. The keyboard's own A.
   pauseKeys: ['a'],
 

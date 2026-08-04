@@ -9,6 +9,8 @@ import { REMOTE } from './config.js';
  * with. The little VR remotes used for this are HID devices with several modes,
  * and what a button on one sends depends on which mode it is in:
  *
+ *   - as a mouse, which is the mode these remotes are usually left in - the
+ *     button is a left click and no key is sent at all;
  *   - as a keyboard, but reporting only a legacy `keyCode` with `key` left as
  *     'Unidentified' - so a test on `key` alone never matches;
  *   - as a keyboard sending some other key entirely, because the button labelled
@@ -16,9 +18,9 @@ import { REMOTE } from './config.js';
  *   - as a gamepad, in which case no key event is raised at all and no amount of
  *     listening for one will help.
  *
- * So all three are handled: a key is matched on any of the three things a
- * browser might fill in, the list of keys is a setting rather than a constant,
- * and gamepad buttons are watched for directly.
+ * So all four are handled: a left click anywhere pauses, a key is matched on any
+ * of the three things a browser might fill in, the list of keys is a setting
+ * rather than a constant, and gamepad buttons are watched for directly.
  *
  * Everything that arrives and is *not* recognised is logged, with all of its
  * identifying properties. A remote nobody has in front of them can then be
@@ -32,13 +34,53 @@ import { REMOTE } from './config.js';
  * @param {() => void} onPress called once per press, however it arrived
  */
 export function onPauseRequest(onPress) {
+  const stopClicks = watchClicks(onPress);
   const stopKeys = watchKeys(onPress);
   const stopPads = watchGamepads(onPress);
 
   return () => {
+    stopClicks();
     stopKeys();
     stopPads();
   };
+}
+
+/**
+ * A left click, which is what the remote actually sends.
+ *
+ * These remotes are usually left in mouse mode, where the button moves a cursor
+ * and clicks with it - so nothing arrives as a key at all, whatever the button
+ * is labelled, and every amount of listening for a letter was listening for
+ * something that was never sent.
+ *
+ * Anywhere on the screen counts. The scanner has nothing on it to click: no
+ * buttons, no fields, nothing to aim at - and a remote in mouse mode leaves its
+ * cursor wherever it was last, so requiring a target would mean requiring the
+ * operator to aim at something they cannot see. Anything genuinely interactive
+ * that is added later is skipped, so this cannot swallow a real control.
+ */
+function watchClicks(onPress) {
+  if (!REMOTE.leftClick) return () => {};
+
+  const handler = (event) => {
+    // The primary button only. A right click is a context menu and a middle
+    // click is a paste, and neither is somebody asking to pause scanning.
+    if (event.button !== 0) {
+      if (REMOTE.logInput) console.log(`[remote] ignored click: button=${event.button}`);
+      return;
+    }
+
+    if (event.target && typeof event.target.closest === 'function' &&
+        event.target.closest('button, a, input, select, textarea, [role="button"]')) {
+      return;
+    }
+
+    console.log('[remote] pause pressed (left click)');
+    onPress();
+  };
+
+  window.addEventListener('click', handler, true);
+  return () => window.removeEventListener('click', handler, true);
 }
 
 /**
