@@ -180,6 +180,12 @@ export function adaptiveInk(luma, width, height, { radius, offset, margin = 0 })
  * @param {number} height
  */
 export function createCanvas(width, height) {
+  // Off the main thread there is no document to make an element with, and an
+  // OffscreenCanvas is the same thing for every purpose anything here has: it
+  // has a 2d context, getImageData and putImageData. This is what lets the
+  // extraction run in a worker without a line of it changing.
+  if (typeof document === 'undefined') return new OffscreenCanvas(width, height);
+
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;

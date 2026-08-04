@@ -2,7 +2,7 @@ import { DISPLAY } from './js/config.js';
 import { Camera } from './js/camera.js';
 import { PaperScanner } from './js/detector.js';
 import { capturePage } from './js/capture.js';
-import { extractDrawing } from './js/extract.js';
+import { extract } from './js/extractor.js';
 import { createSession, waitForSession } from './js/api.js';
 import { onPauseRequest } from './js/remote.js';
 
@@ -184,13 +184,24 @@ async function runSession(quad, insetRatio) {
     const page = capturePage(el.preview, quad, sample, insetRatio);
     if (!page) throw new Error('Could not read the page from the camera.');
 
+    // The visitor is told what is happening *before* the slow part, not after.
+    // Extraction takes about a second on a real scan, and it used to run with
+    // the live-camera screen still up - so for that second the preview sat
+    // frozen on the last frame, which reads as the kiosk having crashed rather
+    // than as it working.
+    setScreen('process');
+    el.processStage.textContent = STAGE_LABELS.reading;
+    showDetectedText(null);
+    await nextFrame();
+
     const t1 = performance.now();
-    const drawing = extractDrawing(page);
+
+    // Off the main thread where the browser allows it, so the screen stays
+    // alive while this runs. Same extraction either way - see extractor.js.
+    const drawing = await extract(page);
     const t2 = performance.now();
 
-    setScreen('process');
     el.processStage.textContent = STAGE_LABELS.saving;
-    showDetectedText(null);
 
     const payload = {
       paper: page.toDataURL('image/png'),
