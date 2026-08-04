@@ -2,6 +2,7 @@ import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB, ANIMATE, FLOAT } from './config.
 import { Boat3D } from './boat3d.js';
 import { sealHoles } from './seal.js';
 import { measureHull } from './waterline.js';
+import { surveyWater } from './surface.js';
 
 /**
  * Three.js, fetched the first time a model actually needs it.
@@ -47,12 +48,6 @@ const MOTION = {
   boatMaxWidth: 0.42, // of canvas width
   boatMaxHeight: 0.48, // of canvas height
 
-  // Where the surface of the water sits on the canvas.
-  //
-  // This is the water, not the boat. How deep a particular boat floats in it is
-  // measured from that boat's own drawing - see waterline.js - so nothing here
-  // has to know anything about what was drawn.
-  waterlineY: 0.52,
 };
 
 /**
@@ -114,6 +109,18 @@ export class Stage {
 
     /** Where the water crosses this boat, measured from its own silhouette. */
     this.hull = null;
+
+    /**
+     * Where the water is in the background, measured from the footage.
+     *
+     * Until the survey has run - and if it can never run, because nothing is
+     * moving to be found - the whole frame is taken to be water, which is what
+     * the shipped footage actually is and what the fixed height assumed.
+     */
+    this.water = { top: 0, waterline: FLOAT.surface.sit, moving: false };
+
+    /** Which background the survey was of, so a new one is surveyed again. */
+    this.surveyed = null;
 
     // Built once and reused. Creating a WebGL context per visitor would leak
     // contexts until the browser started refusing them.
@@ -290,6 +297,94 @@ export class Stage {
     return Boolean(this.gl && this.gl.ready);
   }
 
+  /**
+   * Where the surface of the water sits on the wall, for this boat.
+   *
+   * The survey says where the water is in the footage, and that is the answer
+   * nearly always. The two things this adds are the bounds of the wall itself.
+   *
+   * A boat hangs a reflection below itself about as long as the part of it that
+   * is out of the water, so a waterline found low in the frame - a lake seen
+   * over a near bank, say - can be far enough down that the mirror runs off the
+   * bottom of the screen. So the surface is lifted as far as it needs to be for
+   * the reflection to fit, and no further.
+   *
+   * ...but never up onto the bank. If the boat cannot fit below the water's own
+   * top edge, it stays in the water and the reflection is the thing that gets
+   * cut - a boat sitting on a hillside is a mistake anyone can see, and a
+   * reflection running off the bottom of the wall is one nobody will.
+   */
+  surfaceY(h, boatH, crossing) {
+    const wanted = h * this.water.waterline;
+
+    // How far the mirror will hang below the surface: the part of the boat that
+    // is out of the water, foreshortened.
+    const top = this.hull ? this.hull.top : 0;
+    const mirror = Math.max(0, crossing - top) * boatH * WAVES.reflection.squash;
+
+    const lowest = h - mirror - h * 0.02;
+    const highest = h * this.water.top + boatH * 0.1;
+
+    return Math.max(highest, Math.min(wanted, lowest));
+  }
+
+  /**
+   * Works out where the water is in whatever the background is now showing.
+   *
+   * Called when the wall starts and again whenever the background is changed
+   * from the panel. It is of the footage, not of the boat, so it does not have
+   * to be redone for every visitor - and it takes about two thirds of a second,
+   * which is time there is between backgrounds and time there is not while
+   * somebody is watching their boat.
+   *
+   * Runs to itself. If it cannot be done - the video is not ready, nothing in
+   * the scene is moving, the footage will not decode - the wall carries on with
+   * the whole frame taken as water, which is what it always used to assume.
+   *
+   * @returns {Promise<object|null>} what was found, for whoever wants to log it
+   */
+  async surveyBackground() {
+    const video = this.background;
+    const source = video && (video.currentSrc || video.src);
+    if (!video) return null;
+
+    try {
+      const found = await surveyWater(video);
+      if (!found) return null;
+
+      this.water = found;
+      this.surveyed = source;
+
+      console.log(
+        found.moving
+          ? `[stage] water starts at ${found.top.toFixed(3)} of the background; ` +
+            `the boat floats at ${found.waterline.toFixed(3)}`
+          : '[stage] nothing in the background is moving; taking all of it for water'
+      );
+
+      return found;
+    } catch (err) {
+      console.warn('[stage] could not survey the background:', err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Surveys the background if it has changed since the last one.
+   *
+   * The panel can swap the footage at any moment, and a wall left running for a
+   * week would otherwise be floating boats at a waterline measured off a video
+   * that is no longer playing.
+   */
+  resurveyIfChanged() {
+    const video = this.background;
+    const source = video && (video.currentSrc || video.src);
+    if (!source || source === this.surveyed) return;
+
+    this.surveyed = source;
+    this.surveyBackground();
+  }
+
   /** Back to background only. */
   clear() {
     this.boat = null;
@@ -384,8 +479,8 @@ export class Stage {
     // that came to 0.75 of the image every time whatever was drawn; a hull that
     // finishes at 0.60 because the visitor drew lily pads under it was then hung
     // a sixth of the picture clear of the water, and nothing was ever submerged.
-    const waterline = h * MOTION.waterlineY + lift;
     const crossing = this.hull ? this.hull.waterline : FALLBACK_WATERLINE;
+    const waterline = this.surfaceY(h, boatH, crossing) + lift;
     const centreY = waterline - (crossing - 0.5) * boatH;
 
     const delta = Math.max(0, Math.min(100, now - this.lastFrameAt));

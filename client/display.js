@@ -235,6 +235,12 @@ function applyBackground(settings) {
   backgroundSource.load();
   startBackground();
 
+  // Where the water is in this footage is a different question from where it was
+  // in the last, so it is asked again. Nothing waits on the answer: the wall
+  // keeps drawing, and the surface moves to where it was found when the survey
+  // comes back a moment later.
+  surveyWhenPlaying();
+
   console.log(`[display] background is now ${wanted}`);
 }
 
@@ -246,7 +252,39 @@ function startBackground() {
   });
 }
 
+/**
+ * Measures where the water is, once the footage is actually running.
+ *
+ * It has to be playing, because what is being looked for is movement: surveyed
+ * on a paused video every row is equally still and the answer is "no water
+ * anywhere". So the survey waits for frames to be arriving, and gives up
+ * quietly if they never do - the wall then treats the whole frame as water,
+ * which is what it did before any of this.
+ */
+function surveyWhenPlaying() {
+  let tries = 0;
+
+  const attempt = () => {
+    tries += 1;
+
+    if (backgroundSource.readyState >= 2 && !backgroundSource.paused) {
+      stage.surveyBackground();
+      return;
+    }
+
+    if (tries > 20) {
+      console.warn('[display] background never started playing; not surveying it');
+      return;
+    }
+
+    setTimeout(attempt, 250);
+  };
+
+  attempt();
+}
+
 startBackground();
+surveyWhenPlaying();
 
 stage.start();
 

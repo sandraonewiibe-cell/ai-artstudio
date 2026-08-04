@@ -858,6 +858,30 @@ export const FLOAT = {
   veil: 0.72,
 
   /**
+   * Where the boat sits in whatever water the background is showing.
+   *
+   * Where the water *is* is not here, because it is not a setting: it is
+   * measured off the footage every time the background changes - see
+   * surface.js. This is the one thing left that is a choice rather than a fact.
+   */
+  surface: {
+    /**
+     * How far down the visible water the boat floats.
+     *
+     * Down the water, not down the screen. On open water from edge to edge -
+     * which is what the kiosk's own footage is - the two are the same thing and
+     * this comes out at 0.52 of the wall, exactly where the fixed height used to
+     * put it. On a lake with a shoreline a third of the way down, the same
+     * figure puts the boat two thirds of the way down the frame instead, out in
+     * the open water rather than up against the bank.
+     *
+     * Which is a matter of composition and not of fact, so it is a number here.
+     * How far down the *screen* that lands is a fact, and is not.
+     */
+    sit: 0.52,
+  },
+
+  /**
    * The shadow the boat casts on the water right under it.
    *
    * Nothing here is a position. The shadow follows the boat's beam - how wide
