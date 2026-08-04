@@ -888,6 +888,45 @@ export const FLOAT = {
     // discernible edge anywhere on it stops being a shadow.
     blurPx: 12,
   },
+
+  /**
+   * The rings spreading out from under the hull.
+   *
+   * Nothing white is drawn and no colour is introduced. Each ring is a pair of
+   * soft strokes, one lighter and one darker, blended into the lake rather than
+   * painted onto it - so what changes is how bright the water already there is.
+   * That is what lets these work on footage nobody has chosen yet.
+   *
+   * Like everything else about the boat's flotation, they are sized from its
+   * beam, so nothing here has to know what was drawn.
+   */
+  ripples: {
+    // How many are on the water at once, spread evenly through the cycle so one
+    // is always on its way out.
+    count: 4,
+
+    // How long a ring takes to go from the hull to nothing.
+    periodMs: 4200,
+
+    // How far out it gets by the end, against the boat's beam.
+    spread: 1.5,
+
+    // How flat the ring lies. A ring on water seen from this angle is a very
+    // shallow ellipse; anything rounder reads as a circle drawn on a lake,
+    // which is what went wrong the first time these were tried.
+    flatten: 0.16,
+
+    // How hard the pair of strokes work on the water under them. Small - these
+    // are meant to be felt rather than seen, and the eye is very good at
+    // spotting a drawn line on a photograph.
+    opacity: 0.5,
+
+    // How thick a ring is, against its own height.
+    thickness: 0.45,
+
+    // Softened, so a ring is a band of brighter water rather than a stroke.
+    blurPx: 3.5,
+  },
 };
 
 export const WAVES = {

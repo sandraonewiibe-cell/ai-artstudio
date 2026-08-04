@@ -77,14 +77,6 @@ const OVERLAY = {
   featherStart: 0.62,  // where its inner edge starts fading out
 };
 
-const RIPPLE = {
-  count: 3,
-  periodMs: 3800,
-  widthOfBoat: 0.46,
-  flatten: 0.3,
-  lineWidth: 2,
-};
-
 export class Stage {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -409,14 +401,15 @@ export class Stage {
     const keelY = centreY - boatH / 2 + (this.hull ? this.hull.bottom : 1) * boatH;
     const shadow = { centreX, boatW, tilt, keelY };
 
-    // The boat's shadow on the water, before the boat goes on top of it.
+    // Everything that happens to the water because the boat is in it, laid on
+    // the lake before the boat goes on top.
     //
-    // Before, because a shadow falls on the water and not on the boat. Drawn
-    // afterwards it multiplied over the hull as well and darkened the visitor's
-    // own drawing, which is the one thing on the wall that may never be altered.
-    // Under the boat it is hidden by the boat, and what shows is what falls
-    // beyond it - which is all a contact shadow ever is.
-    this.drawContactShadow(this.ctx, shadow, 0);
+    // Before, because these fall on the water and not on the boat. Drawn
+    // afterwards they worked over the hull as well and altered the visitor's own
+    // drawing, which is the one thing on the wall that may never be touched.
+    // Under the boat they are hidden by the boat, and what shows is what reaches
+    // past it - which is all any of them ever is.
+    this.drawWaterMarks(this.ctx, { ...shadow, waterline, elapsed }, 0);
 
     if (sculpted) this.renderSculpt(lift, tilt, elapsed);
 
@@ -452,7 +445,7 @@ export class Stage {
     // nothing is cut off, faded or repainted - the water is simply drawn over
     // the part of it that is under the water, which is what being in the water
     // looks like.
-    this.submerge(waterline, centreY + boatH / 2, w, h, shadow);
+    this.submerge(waterline, centreY + boatH / 2, w, h, { ...shadow, waterline, elapsed });
 
     // The reflection lies *on* the surface, so it goes over the water rather
     // than under it - after the veil, not before. It used to be drawn first, and
@@ -628,7 +621,7 @@ export class Stage {
    * the water over itself, which changes nothing and costs one composite, and it
    * saves having to work out how far a rolling, pitching hull reaches sideways.
    */
-  submerge(waterline, bottomY, w, h, shadow) {
+  submerge(waterline, bottomY, w, h, marks) {
     const top = Math.max(0, Math.floor(waterline));
     const depth = Math.ceil(Math.min(h, bottomY) - top);
     if (depth < 2) return;
@@ -647,7 +640,11 @@ export class Stage {
     // ground the shadow has already been laid on, so without it the water in
     // front of the hull would be the one patch of lake with no shadow in it -
     // a bright stripe cut across the middle of it at the waterline.
-    if (shadow) this.drawContactShadow(bctx, shadow, -top);
+    // The water carries what the boat does to it here too. This band is drawn
+    // over ground those marks have already been laid on, so without them the
+    // water in front of the hull would be the one patch of lake with none - a
+    // clean stripe cut across the middle of it at the waterline.
+    if (marks) this.drawWaterMarks(bctx, marks, -top);
 
     // Rubbed away at the top and left almost whole at the bottom, so the water
     // thickens with depth instead of arriving all at once along a line.
@@ -700,6 +697,88 @@ export class Stage {
   drawSculpt(centreX, centreY, boatW, boatH) {
     const size = Math.max(boatW, boatH) * GLB.cover;
     this.ctx.drawImage(this.gl.canvas, centreX - size / 2, centreY - size / 2, size, size);
+  }
+
+  /**
+   * Everything the boat does to the water it is sitting in.
+   *
+   * Gathered into one call because they all want the same two things: to be
+   * drawn on the lake and not on the boat, and to be drawn twice - once on the
+   * open water, and again into the band of water that goes in front of the
+   * submerged hull, which would otherwise come out clean where everything around
+   * it is not.
+   */
+  drawWaterMarks(ctx, marks, offsetY) {
+    this.drawContactShadow(ctx, marks, offsetY);
+    this.drawRipples(ctx, marks, offsetY);
+  }
+
+  /**
+   * The rings spreading out from under the hull.
+   *
+   * These were drawn once before and taken off the wall, and the note left
+   * behind said why: they came out as a hard white ellipse sitting on the water
+   * beside the boat - a drawn circle, plainly part of neither the sketch nor the
+   * scene, and the first thing the eye went to. It also said what to do about
+   * it, which was to rebuild them as a disturbance of the water rather than a
+   * line laid over it. That is what this is.
+   *
+   * Nothing white is drawn. Each ring is a pair of soft strokes, one lighter and
+   * one darker, a hair apart - the near face of a ripple catching the sky and
+   * the far face falling away from it - and they are blended into the lake
+   * rather than painted onto it, so what changes is how bright the water already
+   * there is. On a pale lake they lift and dip it slightly; on a dark one they
+   * do the same to a dark surface. No colour is introduced at any point, which
+   * is what keeps this working on footage nobody has chosen yet.
+   *
+   * They start at the boat's beam and spread outward, flattened hard, because a
+   * ring on water seen at this angle is a very shallow ellipse. Each fades in as
+   * it leaves the hull and out as it goes, so there is nothing to see arriving
+   * or leaving.
+   */
+  drawRipples(ctx, { centreX, boatW, waterline, elapsed }, offsetY) {
+    if (!this.hull || !FLOAT.ripples.opacity) return;
+
+    const { count, periodMs, spread, flatten, opacity, blurPx, thickness } = FLOAT.ripples;
+
+    const { left, right } = this.hull.beam;
+    const beam = Math.max(0, right - left) * boatW;
+    if (beam < 8) return;
+
+    const cx = centreX + ((left + right) / 2 - 0.5) * boatW;
+    const cy = waterline + offsetY;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.filter = `blur(${blurPx.toFixed(1)}px)`;
+
+    for (let i = 0; i < count; i += 1) {
+      // Evenly spaced through one cycle, so a ring is always on its way out.
+      const age = (((elapsed / periodMs) + i / count) % 1 + 1) % 1;
+
+      const rx = (beam / 2) * (0.55 + spread * age);
+      const ry = Math.max(1, rx * flatten);
+
+      // Up quickly as it leaves the hull, then away across the rest of it.
+      const strength = (age < 0.15 ? age / 0.15 : 1 - (age - 0.15) / 0.85) * opacity;
+      if (strength <= 0.004) continue;
+
+      const lw = Math.max(1, ry * thickness);
+      ctx.lineWidth = lw;
+
+      // The face turned towards the sky, and the one turned away from it.
+      ctx.strokeStyle = `rgba(255, 255, 255, ${strength.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - lw * 0.45, rx, ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(0, 0, 0, ${(strength * 0.85).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + lw * 0.45, rx, ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   /**
@@ -1033,36 +1112,6 @@ export class Stage {
       ctx.strokeStyle = `rgba(255, 255, 255, ${fade.toFixed(3)})`;
       ctx.beginPath();
       ctx.ellipse(centreX - behind, baseY + ry * 0.5, rx, ry, 0, Math.PI * 0.15, Math.PI * 0.85);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  /** Flattened rings spreading out directly beneath the hull. */
-  drawRipples(centreX, baseY, boatW, elapsed) {
-    const { ctx } = this;
-    const maxW = boatW * RIPPLE.widthOfBoat;
-
-    ctx.save();
-    ctx.lineWidth = RIPPLE.lineWidth;
-
-    for (let i = 0; i < RIPPLE.count; i += 1) {
-      const offset = (RIPPLE.periodMs / RIPPLE.count) * i;
-      const phase =
-        ((((elapsed + offset) % RIPPLE.periodMs) + RIPPLE.periodMs) % RIPPLE.periodMs) /
-        RIPPLE.periodMs;
-
-      // Widen faster than they grow tall, so the rings lie flat on the water.
-      const rx = maxW * (0.22 + 1.08 * phase) * 0.5;
-      const ry = rx * RIPPLE.flatten * (0.55 + 0.45 * phase);
-
-      // Fade in quickly, then out across the rest of the cycle.
-      const alpha = phase < 0.18 ? phase / 0.18 : 1 - (phase - 0.18) / 0.82;
-
-      ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(0, alpha) * 0.42})`;
-      ctx.beginPath();
-      ctx.ellipse(centreX, baseY + ry * 0.4, rx, ry, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 
