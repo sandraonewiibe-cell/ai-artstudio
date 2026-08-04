@@ -930,15 +930,47 @@ export const FLOAT = {
 };
 
 export const WAVES = {
-  // Two overlapping swells. Different lengths and speeds stop the surface
-  // looking like a metronome.
-  primary: { wavelength: 0.62, amplitude: 0.028, periodMs: 5200 },
-  secondary: { wavelength: 0.23, amplitude: 0.011, periodMs: 3100 },
+  /**
+   * Two overlapping swells. Different lengths and speeds stop the surface
+   * looking like a metronome.
+   *
+   * Both are long compared with a boat, and that is the number that matters
+   * here rather than any of the others.
+   *
+   * The hull takes its attitude by sampling this field at the bow and at the
+   * stern: the mean of the two is how far it rises, and the difference is how
+   * far it leans. So the ratio between the swell and the boat decides what kind
+   * of motion comes out, and getting it wrong does not make the motion wrong by
+   * a little - it swaps the two over.
+   *
+   * The primary used to be 0.62 of the wall, about 1190px, against a boat of
+   * some 640px. That puts the bow and the stern very nearly half a wave apart,
+   * which is the worst ratio there is: in antiphase the mean cancels and the
+   * difference is at its maximum. Measured over a crossing, 30px of swell came
+   * out as 9px of heave with three reversals in fifteen seconds - no bobbing to
+   * speak of - while the lean sat on its 9-degree limit for an eighth of the
+   * time. The boat lurched from rail to rail and hardly rose at all. The
+   * secondary was worse still at 442px, shorter than the boat, so the hull was
+   * aliasing against it rather than riding it.
+   *
+   * A real swell on a lake is far longer than a boat, and at these lengths the
+   * widest boat the wall can draw spans about a fifth of a wave. The bow and the
+   * stern then rise together, which is heave, and lean by the small angle
+   * between them, which is roll.
+   */
+  primary: { wavelength: 1.9, amplitude: 0.030, periodMs: 4200 },
+  secondary: { wavelength: 0.85, amplitude: 0.009, periodMs: 2900 },
 
-  // How hard the hull pitches with the slope of the water. Slightly over 1
-  // reads better than exact - a real hull exaggerates the surface angle.
-  tiltGain: 1.35,
-  maxTiltDegrees: 9,
+  // How hard the hull leans with the slope of the water, and the most it may
+  // ever lean.
+  //
+  // Under 1 now, where it was 1.35 to exaggerate a surface angle. There is
+  // nothing left to exaggerate: with the swell long compared with the boat, the
+  // angle across the hull is a real one rather than an artefact of sampling a
+  // wave at half its own length, and the limit is a backstop rather than
+  // something the boat spends its time resting against.
+  tiltGain: 0.6,
+  maxTiltDegrees: 6,
 
   // How much the hull bends to follow the surface rather than staying rigid.
   // 0 is a plank, 1 is a ribbon; a little flex is what sells it as a boat
