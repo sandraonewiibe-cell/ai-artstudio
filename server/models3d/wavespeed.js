@@ -69,12 +69,23 @@ module.exports = {
     // 4. Fetch what it made.
     const url = pickModel(finished.outputs);
     if (!url) {
+      dump('outputs', {
+        url: 'n/a',
+        method: 'n/a',
+        status: finished.status,
+        raw: JSON.stringify(finished.outputs),
+      });
       console.warn('[3d] wavespeed finished with no model file in its outputs.');
       return null;
     }
 
+    say(`downloading ${url}`);
+
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Could not fetch the model (${response.status}).`);
+    if (!response.ok) {
+      dump('download', { url, method: 'GET', status: response.status, raw: await response.text().catch(() => '') });
+      throw new Error(`Could not fetch the model (${response.status}).`);
+    }
 
     const buffer = Buffer.from(await response.arrayBuffer());
     const ext = url.toLowerCase().split('?')[0].endsWith('.gltf') ? 'gltf' : 'glb';
@@ -93,26 +104,48 @@ module.exports = {
  * kilobytes or so and goes up in one request.
  */
 async function upload({ apiKey, base, buffer, mime, say }) {
+  const url = `${base}/media/upload/binary`;
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mime || 'image/png' }), 'drawing.png');
 
-  const response = await fetch(`${base}/media/upload/binary`, {
+  say(`uploading ${Math.round(buffer.length / 1024)}KB to ${url}`);
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
   });
 
-  const body = await response.json().catch(() => ({}));
+  const raw = await response.text();
+  const body = parse(raw);
 
   if (!response.ok) {
+    dump('upload', {
+      url,
+      body: `multipart/form-data; file=drawing.png (${buffer.length} bytes, ${mime || 'image/png'})`,
+      status: response.status,
+      raw,
+    });
     throw new Error(reason(body, response.status, 'WaveSpeed refused the upload'));
   }
 
-  const url = body && body.data && body.data.download_url;
-  if (!url) throw new Error('WaveSpeed accepted the upload but gave no URL back.');
+  const link = body && body.data && body.data.download_url;
+  if (!link) {
+    dump('upload', { url, status: response.status, raw });
+    throw new Error('WaveSpeed accepted the upload but gave no URL back.');
+  }
 
-  say(`uploaded ${Math.round(buffer.length / 1024)}KB`);
-  return url;
+  say(`uploaded, available at ${link}`);
+  return link;
+}
+
+/** JSON if it is JSON, and nothing if it is an error page. */
+function parse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -127,13 +160,16 @@ async function upload({ apiKey, base, buffer, mime, say }) {
  * is a setting rather than an edit.
  */
 async function submit({ apiKey, base, model, imageUrl, input, extra, say }) {
+  const url = `${base}/${model}`;
   const body = {
     image: imageUrl,
     face_count: input.faces,
     ...extra,
   };
 
-  const response = await fetch(`${base}/${model}`, {
+  say(`submitting to ${url} with ${JSON.stringify(body)}`);
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -142,16 +178,21 @@ async function submit({ apiKey, base, model, imageUrl, input, extra, say }) {
     body: JSON.stringify(body),
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const raw = await response.text();
+  const payload = parse(raw);
 
   if (!response.ok) {
-    throw new Error(reason(payload, response.status, `WaveSpeed refused the request`));
+    dump('submit', { url, body, status: response.status, raw });
+    throw new Error(reason(payload, response.status, 'WaveSpeed refused the request'));
   }
 
   const data = payload && payload.data;
-  if (!data || !data.id) throw new Error('WaveSpeed accepted the request but started no prediction.');
+  if (!data || !data.id) {
+    dump('submit', { url, body, status: response.status, raw });
+    throw new Error('WaveSpeed accepted the request but started no prediction.');
+  }
 
-  say(`submitted to ${model} as ${data.id}`);
+  say(`submitted as ${data.id}, status ${data.status || 'unknown'}`);
   return data;
 }
 
@@ -161,21 +202,32 @@ async function settle({ apiKey, prediction, pollMs, deadline, say }) {
     `${config.wavespeed.base}/predictions/${prediction.id}/result`;
 
   let current = prediction;
+  let polls = 0;
 
   while (!['completed', 'failed'].includes(current.status)) {
-    if (Date.now() > deadline) throw new Error('WaveSpeed took too long.');
+    if (Date.now() > deadline) {
+      dump('poll', { url, method: 'GET', status: 'timeout', raw: `last status "${current.status}" after ${polls} polls` });
+      throw new Error('WaveSpeed took too long.');
+    }
 
     await new Promise((resolve) => setTimeout(resolve, pollMs));
+    polls += 1;
 
     const response = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const payload = await response.json().catch(() => ({}));
+    const raw = await response.text();
+    const payload = parse(raw);
 
     if (!response.ok) {
+      dump('poll', { url, method: 'GET', status: response.status, raw });
       throw new Error(reason(payload, response.status, 'Could not read the prediction'));
     }
 
     current = (payload && payload.data) || {};
-    say(`${current.status || 'unknown'}`);
+    say(`poll ${polls}: ${current.status || 'unknown'}`);
+  }
+
+  if (current.status === 'failed') {
+    dump('poll', { url, method: 'GET', status: 'failed', raw: JSON.stringify(current) });
   }
 
   return current;
@@ -192,6 +244,40 @@ async function settle({ apiKey, prediction, pollMs, deadline, say }) {
 function reason(body, status, what) {
   const said = (body && (body.message || body.error || body.detail)) || '';
   return `${what} (${status})${said ? `: ${said}` : ''}`;
+}
+
+/**
+ * Everything about a call that did not work, printed in full.
+ *
+ * A one-line summary is enough to fall back on and not enough to fix anything.
+ * When a service refuses, what is actually wanted is the address it was asked
+ * at, what it was asked, and what it said back - verbatim, because the useful
+ * part is usually a field name nobody expected or a sentence the summary threw
+ * away.
+ *
+ * The key never appears. It is the one thing here that must not end up in a log
+ * an exhibition might mail somebody.
+ */
+function dump(what, { url, method = 'POST', body, status, raw }) {
+  const lines = [
+    `[3d] wavespeed FAILED at ${what}`,
+    `      ${method} ${url}`,
+    `      authorization: Bearer <key withheld>`,
+  ];
+
+  if (body !== undefined) {
+    const shown = typeof body === 'string' ? body : JSON.stringify(body);
+    lines.push(`      request: ${shown.length > 600 ? `${shown.slice(0, 600)}…` : shown}`);
+  }
+
+  if (status !== undefined) lines.push(`      status: ${status}`);
+
+  if (raw !== undefined) {
+    const shown = String(raw);
+    lines.push(`      response: ${shown.length > 900 ? `${shown.slice(0, 900)}…` : shown}`);
+  }
+
+  console.error(lines.join('\n'));
 }
 
 /**
