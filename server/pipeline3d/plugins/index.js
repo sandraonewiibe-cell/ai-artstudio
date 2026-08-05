@@ -132,7 +132,9 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * wait three times for the same no.
  */
 function settled(err) {
-  return /insufficient credit|no such|not found|404|401|403|has no endpoint|nowhere to put/i.test(err.message);
+  return /insufficient credit|insufficient balance|quota|no such|not found|404|401|402|403|has no endpoint|nowhere to put/i.test(
+    err.message
+  );
 }
 
 /** What to print at startup, so a misconfigured plugin is visible before a visitor finds it. */

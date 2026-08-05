@@ -34,6 +34,25 @@ function num(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/**
+ * A JSON setting, or the default if it is missing or malformed.
+ *
+ * Malformed rather than fatal on purpose: a mistyped provider option should
+ * cost that option and not stop the kiosk starting. It says so, loudly, so the
+ * mistake is findable.
+ */
+function json(value, fallback) {
+  if (!value) return fallback;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (err) {
+    console.warn(`[config] ignoring malformed JSON setting: ${err.message}`);
+    return fallback;
+  }
+}
+
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 /** '40mb' and the like, as a number. */
@@ -182,6 +201,53 @@ module.exports = {
     // busy afternoon, short enough that a wedged prediction is eventually let
     // go rather than held forever.
     timeoutMs: num(process.env.MODEL3D_TIMEOUT_MS, 90 * 1000),
+  },
+
+  /**
+   * Everything the WaveSpeed AI provider needs. Ignored by the others.
+   *
+   * Off unless MODEL3D_PROVIDER=wavespeed and a key is set. With no key the
+   * provider declines quietly and the pipeline builds the model itself, so
+   * setting none of this leaves the kiosk exactly as it was.
+   */
+  wavespeed: {
+    apiKey: process.env.WAVESPEED_API_KEY || '',
+    base: process.env.WAVESPEED_API_BASE || 'https://api.wavespeed.ai/api/v3',
+
+    /**
+     * Which model to ask, as the path after the base.
+     *
+     * A setting rather than a constant, so pointing this at Tripo, Meshy or
+     * Rodin instead is an environment variable and not an edit. Whatever is
+     * named here has to take an `image` and give back a GLB.
+     */
+    model: process.env.WAVESPEED_MODEL || 'wavespeed-ai/hunyuan3d-v3/image-to-3d',
+
+    pollMs: num(process.env.WAVESPEED_POLL_MS, 2000),
+
+    /**
+     * Generous, because nobody is waiting on it - the boat is already sailing.
+     * Long enough for a queue on a busy afternoon, short enough that a wedged
+     * prediction is eventually let go rather than held for ever.
+     */
+    timeoutMs: num(process.env.WAVESPEED_TIMEOUT_MS, 120 * 1000),
+
+    /**
+     * Anything else the chosen model wants, as JSON.
+     *
+     * Each of these models names its options differently - enable_pbr and
+     * polygon_type on Hunyuan3D, other things elsewhere - and this is what keeps
+     * that out of the code. e.g. WAVESPEED_INPUT='{"enable_pbr":false}'
+     *
+     * Bad JSON is ignored rather than fatal: a mistyped option should cost the
+     * option, not the exhibition.
+     */
+    extra: json(process.env.WAVESPEED_INPUT, {}),
+
+    // One line per step - upload, submit, each poll, download. On by default:
+    // this runs unattended, and a provider that fails quietly at an exhibition
+    // is a provider nobody can fix.
+    log: process.env.WAVESPEED_LOG !== 'false',
   },
 
   /** Everything the Hugging Face Space provider needs. Ignored by the others. */
