@@ -336,6 +336,14 @@ function describe3D() {
       : `${name} - ${model} - NO WAVESPEED_API_KEY, so nothing will be generated`;
   }
 
+  if (name === 'tripo') {
+    const { apiKey, version, timeoutMs } = config.tripo;
+    const which = version || 'its current model';
+    return apiKey
+      ? `${name} - ${which} - key present, ready (timeout ${Math.round(timeoutMs / 1000)}s)`
+      : `${name} - ${which} - NO TRIPO_API_KEY, so nothing will be generated`;
+  }
+
   if (name === 'huggingface') {
     const { space, token, api } = config.huggingface;
     if (!space) return `${name} - NO HF_SPACE_URL, so nothing will be generated`;

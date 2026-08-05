@@ -257,6 +257,48 @@ module.exports = {
     log: process.env.WAVESPEED_LOG !== 'false',
   },
 
+  /**
+   * Everything the Tripo AI provider needs. Ignored by the others.
+   *
+   * Off unless MODEL3D_PROVIDER=tripo and a key is set. With no key the provider
+   * declines quietly and the pipeline builds the model itself, so setting none
+   * of this leaves the kiosk exactly as it was.
+   */
+  tripo: {
+    apiKey: process.env.TRIPO_API_KEY || '',
+    base: process.env.TRIPO_API_BASE || 'https://api.tripo3d.ai/v2/openapi',
+
+    /**
+     * Which version of the model to ask for, e.g. v2.5-20250123.
+     *
+     * Left empty by default, which lets Tripo pick its current one - the right
+     * behaviour for a kiosk nobody is maintaining week to week.
+     */
+    version: process.env.TRIPO_MODEL_VERSION || '',
+
+    pollMs: num(process.env.TRIPO_POLL_MS, 2000),
+
+    /**
+     * Generous, because nobody is waiting on it - the boat is already sailing.
+     * The same five minutes the other service needed: reconstructing geometry
+     * and baking a texture onto it takes a minute or two, and cutting that off
+     * reads as a failure when it was working.
+     */
+    timeoutMs: num(process.env.TRIPO_TIMEOUT_MS, 300 * 1000),
+
+    /**
+     * Anything else to send with the task, as JSON. e.g. texture_quality,
+     * style, face_limit. Keeps one version's option names out of the code.
+     *
+     * Bad JSON is ignored rather than fatal: a mistyped option should cost the
+     * option, not the exhibition.
+     */
+    extra: json(process.env.TRIPO_INPUT, {}),
+
+    // One line per stage - upload, submit, each change of status, download.
+    log: process.env.TRIPO_LOG !== 'false',
+  },
+
   /** Everything the Hugging Face Space provider needs. Ignored by the others. */
   huggingface: {
     // The Space's address, e.g. https://tencent-hunyuan3d-2.hf.space
