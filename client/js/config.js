@@ -293,21 +293,12 @@ export const EXTRACT = {
     // separates them cleanly.
     hullShareRatio: 0.15,
 
-    /**
-     * Paper kept around writing drawn on the boat, as a fraction of the page's
-     * shorter side.
-     *
-     * A name or a smiley on the hull is written in the same pencil the boat is
-     * drawn in, and the hull is filled with the average of that pencil - so
-     * without a margin the writing is the exact colour of the surface under it
-     * and cannot be read at all. This is how much of the original paper stays
-     * around each mark for it to be read against.
-     *
-     * Small on purpose: enough to separate the letters from the fill, not so
-     * much that the boat looks like it has a hole cut in it. Raise it if
-     * writing is still hard to read on the wall; lower it if the patches show.
-     */
-    writingHaloRatio: 0.006,
+    // There is no longer a setting for paper kept around writing, because no
+    // paper is kept around writing. It existed to stop a letter disappearing
+    // into a hull filled with the average of the same pencil, and the hull has
+    // not been filled that way since blank paper inside it started being shown
+    // as blank paper. All the margin did by then was draw a paper-coloured
+    // rectangle round every letter, star and deck line - see fillEnclosedAreas.
   },
 
   /**
@@ -332,6 +323,44 @@ export const EXTRACT = {
     // Below this share of the page, a patch of colour is a stray mark rather
     // than an area that was coloured in, and is left exactly as it is.
     minAreaRatio: 0.0004,
+
+    /**
+     * How thick something has to be to count as coloured in rather than drawn,
+     * as a fraction of the page's shorter side.
+     *
+     * This is what tells a pen from a crayon, and it is not a question colour
+     * can answer: a blue ballpoint has as much chroma as a blue crayon, so a
+     * boat drawn in biro is entirely "colour" to this pass. It closes the gaps
+     * between the strokes and fills them, and a paper-coloured patch appears
+     * behind the writing.
+     *
+     * Thickness does answer it. Somebody colouring a shape in covers it;
+     * somebody writing draws lines. Anything that survives being eroded by this
+     * much is an area; anything that vanishes was a line, and its strokes are
+     * drawn as the ink they are instead.
+     *
+     * A little over the width of a felt tip at this resolution, which is the
+     * broadest thing anyone writes with. Raise it if line work is still being
+     * filled in; lower it if a genuinely coloured area is coming out as bare
+     * strokes.
+     */
+    penRatio: 0.007,
+
+    /**
+     * How much of a shape has to come back from that erosion for it to count as
+     * an area, as a share of itself.
+     *
+     * How much comes back, rather than whether anything does. A single thick
+     * spot - two rigging lines crossing, the doubled stroke at a bow - leaves a
+     * core somewhere in almost any drawing, and asking only whether one exists
+     * let one such spot rescue a region seven hundred pixels across that was
+     * otherwise all line.
+     *
+     * Half: a shape that was coloured in comes back nearly whole, and line work
+     * comes back as almost nothing, so anything between the two is unusually
+     * ambiguous and there is no harm in it going either way.
+     */
+    solidShare: 0.5,
 
     /**
      * How many hues are told apart.

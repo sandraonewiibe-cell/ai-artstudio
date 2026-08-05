@@ -235,7 +235,7 @@ function splitLayers(base, fill, rect, drawingBounds, hullBounds) {
  */
 function paintedRegions(page, width, height, bounds, banned, strokes) {
   const { chromaThreshold } = EXTRACT.fill;
-  const { closeRatio, minAreaRatio, hueBuckets } = EXTRACT.paint;
+  const { closeRatio, minAreaRatio, hueBuckets, penRatio, solidShare } = EXTRACT.paint;
 
   const empty = {
     mask: new Uint8Array(width * height),
@@ -244,6 +244,10 @@ function paintedRegions(page, width, height, bounds, banned, strokes) {
   };
 
   const radius = Math.max(1, Math.round(Math.min(width, height) * closeRatio));
+
+  // Half the width of the widest thing anybody writes with. What survives being
+  // eroded by this is an area; what does not is a line.
+  const penRadius = Math.max(2, Math.round(Math.min(width, height) * penRatio));
 
   // Room for the closing to work in without the box edge eroding the result.
   const pad = radius + 2;
@@ -309,8 +313,57 @@ function paintedRegions(page, width, height, bounds, banned, strokes) {
     const closed = erode(dilate(seed, width, height, radius, work), width, height, radius, work);
     const { components, labels } = labelComponents(closed, width, height);
 
+    // Which of these are areas, and which are just lines.
+    //
+    // Colour alone cannot tell the difference, and that is the whole trouble. A
+    // blue ballpoint has as much chroma as a blue crayon, so a boat drawn in
+    // biro is *entirely* "colour" as far as this pass is concerned: it buckets
+    // the strokes, closes the gaps between them, and hands back a region. Every
+    // pixel of that region is then filled - the paper between the letters of a
+    // word, the space inside an 'A', the gap between two lines of rigging - and
+    // what appears on the wall is a paper-coloured patch behind the writing.
+    //
+    // Measured on a pen sketch: the hull's outline came back as one region 708
+    // by 196 pixels, the signature as one 161 by 31, and the letter 'm' as a
+    // little block of its own. None of those is an area anybody coloured in.
+    //
+    // What separates them is thickness. Somebody filling a shape in covers it;
+    // somebody writing draws lines. So the closed shape is eroded by more than a
+    // pen is wide, and only what still has something left counts as an area. A
+    // crayoned hull has a solid core and survives easily; a letter, a star, a
+    // signature and an outline have no core at all and are gone.
+    //
+    // Nothing is lost by dropping them. The strokes themselves are ink and are
+    // drawn from the scan in their own colour, at their own thickness, exactly
+    // as they were before - all that stops is the paper *between* them being
+    // filled in.
+    // An opening - eroded, then grown back - which is how much of the shape a
+    // disc wider than a pen can actually reach. A filled area comes back almost
+    // whole; line work comes back as next to nothing.
+    //
+    // How much comes back, rather than whether anything does. A single thick
+    // spot - two rigging lines crossing, the doubled stroke at a bow - is enough
+    // to leave a core somewhere, and asking only whether one exists let one such
+    // spot rescue a region seven hundred pixels across that was otherwise all
+    // line.
+    const opened = dilate(
+      erode(closed, width, height, penRadius, work),
+      width, height, penRadius, work
+    );
+
+    const recovered = new Map();
+
+    for (let y = work.minY; y <= work.maxY; y += 1) {
+      for (let x = work.minX; x <= work.maxX; x += 1) {
+        const i = y * width + x;
+        if (!opened[i] || labels[i] < 0) continue;
+        recovered.set(labels[i], (recovered.get(labels[i]) || 0) + 1);
+      }
+    }
+
     components
       .filter((c) => c.area >= floor)
+      .filter((c) => (recovered.get(c.label) || 0) >= c.area * solidShare)
       // Not the table.
       //
       // A coloured area running off the edge of the rectified page is the
@@ -933,25 +986,32 @@ function fillEnclosedAreas(strokes, labels, hullLabels, writingLabels, bounds, w
       filled += 1;
     }
 
-    if (counter) preserve[i] = 1;
   }
 
-  // The writing itself, and a little of the paper around it.
+  // Nothing is kept as paper any more - not around the writing, and not inside
+  // the letters.
   //
-  // The ink is kept verbatim by renderLayer already; what it needed was
-  // somewhere to be read against. Without this margin a letter is drawn in the
-  // visitor's own pencil directly onto a hull filled with the average of that
-  // same pencil, and disappears into it. The margin is what "the paper behind
-  // it" means - the boat closes back up a few pixels out.
-  const halo = Math.max(
-    2,
-    Math.round(Math.min(width, height) * EXTRACT.fill.writingHaloRatio)
-  );
-  const writingMask = buildStrokeMask(labels, writingLabels, width, height);
-  const around = growBy(writingMask, width, height, halo);
-
-  for (let i = 0; i < preserve.length; i += 1) if (around[i]) preserve[i] = 1;
-
+  // There used to be a margin of photographed paper grown round every mark, so
+  // that a letter had something to be read against. It was needed once: the hull
+  // was filled with the average colour of the ink, and a pencil letter drawn on
+  // that surface disappeared into it. The hull has not been filled that way
+  // since blank paper inside it started being shown as blank paper, so dark
+  // writing on a pale hull is perfectly legible with nothing behind it.
+  //
+  // What the margin still did was draw a box. It was grown with a square, so
+  // what appeared on the wall was a paper-coloured rectangle round every letter,
+  // every star and every deck line - the scissor-cut patches this was meant to
+  // avoid, put there by the one thing that was trying to help.
+  //
+  // The insides of the letters are still filled, so an 'A' on the hull is not a
+  // hole with the lake showing through it. They are simply no longer *preserved*
+  // - they take the same treatment as the hull around them and vanish into it,
+  // which is what the inside of a letter drawn on a boat looks like. Writing on
+  // open paper never had its counters filled at all: they are unreachable only
+  // when the hull encloses them, and out there the hull does not.
+  //
+  // The ink itself is untouched by any of this. Colour, thickness, size and
+  // outline are the scan's, exactly as they always were.
   return { fill, filled, preserve };
 }
 
