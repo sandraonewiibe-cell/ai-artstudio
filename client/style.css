@@ -376,6 +376,46 @@ body[data-scanning="off"] .corner {
   display: none;
 }
 
+/*
+ * What the 3D service did, bottom-left and deliberately quiet.
+ *
+ * Out of the way of the boat, which is what anyone is here to look at, but on
+ * the wall rather than only in a console - an unattended kiosk has nobody
+ * reading its console, which is how a service that was never switched on went
+ * unnoticed.
+ */
+.model-notice {
+  position: fixed;
+  left: 1.5vw;
+  bottom: 1.5vh;
+  max-width: 34vw;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.6rem;
+  border-left: 3px solid rgba(255, 176, 92, 0.9);
+  background: rgba(0, 0, 0, 0.55);
+  text-align: left;
+  pointer-events: none;
+}
+
+.model-notice[hidden] {
+  display: none;
+}
+
+.model-notice-title {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 200, 140, 0.95);
+}
+
+.model-notice-detail {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: rgba(235, 235, 240, 0.72);
+  word-break: break-word;
+}
+
 .link-title {
   font-size: 1.1rem;
   letter-spacing: 0.2em;

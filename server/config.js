@@ -318,6 +318,21 @@ module.exports = {
     // Multiplied by the attempt number, so a second try waits longer than the
     // first. Nobody is waiting on this: the boat is already on the wall.
     backoffMs: num(process.env.PLUGIN_BACKOFF_MS, 4000),
+
+    /**
+     * Whether a service that fails is allowed to be covered for.
+     *
+     * Off by default, which is the exhibition setting: the pipeline builds a
+     * model of its own and the visitor never knows there was a service at all.
+     * The reason is reported either way - it now travels to the wall with the
+     * model rather than staying in a log - so "falling back" is no longer the
+     * same thing as "saying nothing".
+     *
+     * On, no local model is shown when the service fails: the wall says what
+     * went wrong instead. That is what you want while finding out why a service
+     * is not answering, and it is not what you want with visitors in the room.
+     */
+    strict: process.env.MODEL3D_STRICT === 'true',
   },
 
   /**

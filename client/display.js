@@ -43,6 +43,28 @@ function showNotice(visible, detail) {
   if (detail) linkDetail.textContent = detail;
 }
 
+/**
+ * What the 3D service did, in the corner of the wall.
+ *
+ * Small and out of the way, because a visitor is looking at their boat and not
+ * at this - but on the screen rather than only in a console, because a console
+ * on an unattended kiosk is a place nothing gets read. Passing null clears it,
+ * so a working service leaves no mark.
+ */
+function showModelNotice(title, detail) {
+  const box = document.getElementById('modelNotice');
+  if (!box) return;
+
+  if (!title) {
+    box.hidden = true;
+    return;
+  }
+
+  box.hidden = false;
+  box.querySelector('.model-notice-title').textContent = title;
+  box.querySelector('.model-notice-detail').textContent = detail || '';
+}
+
 /** Recording covers the opening of the crossing, never more than all of it. */
 const RECORD_MS = Math.min(DISPLAY.recordMs, DISPLAY.holdMs);
 
@@ -95,17 +117,32 @@ async function play(job) {
 async function modelArrived(id, model) {
   if (!model) return;
 
-  // Every outcome says so. A model that never appears on the wall should leave
-  // a reason on the console, not silence and a flat boat.
+  // Every outcome says so, on the screen as well as on the console. A service
+  // that is failing every time used to look identical to one that was working:
+  // the wall showed a boat either way and the reason sat in a log.
   if (model.status !== 'ready' || !model.url) {
-    console.warn(
-      `[3d] announced for ${id.slice(0, 8)} but not usable: status=${model.status}` +
-        (model.error ? ` - ${model.error}` : '')
+    const why = model.error || `status=${model.status}`;
+    console.warn(`[3d] announced for ${id.slice(0, 8)} but not usable: ${why}`);
+
+    showModelNotice(
+      model.strict
+        ? `${model.provider || '3D service'} failed - no model shown`
+        : `${model.provider || '3D service'} gave no model`,
+      why
     );
     return;
   }
 
-  console.log(`[3d] announced for ${id.slice(0, 8)}: ${model.url}`);
+  // Built here because the service could not. The boat is real and so is the
+  // reason it is not the one that was asked for.
+  if (model.aiError) {
+    console.warn(`[3d] ${id.slice(0, 8)} fell back from ${model.fellBackFrom}: ${model.aiError}`);
+    showModelNotice(`${model.fellBackFrom} failed - showing the locally built boat`, model.aiError);
+  } else {
+    showModelNotice(null);
+  }
+
+  console.log(`[3d] announced for ${id.slice(0, 8)}: ${model.url} (by ${model.provider})`);
 
   // Parsed and on the GPU straight away, whether or not it is wanted yet.
   await stage.preloadModel(model.url);

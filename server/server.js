@@ -329,6 +329,13 @@ function describe3D() {
       : `${name} - ${which} - NO TOKEN, so nothing will be generated`;
   }
 
+  if (name === 'wavespeed') {
+    const { apiKey, model, timeoutMs } = config.wavespeed;
+    return apiKey
+      ? `${name} - ${model} - key present, ready (timeout ${Math.round(timeoutMs / 1000)}s)`
+      : `${name} - ${model} - NO WAVESPEED_API_KEY, so nothing will be generated`;
+  }
+
   if (name === 'huggingface') {
     const { space, token, api } = config.huggingface;
     if (!space) return `${name} - NO HF_SPACE_URL, so nothing will be generated`;

@@ -174,6 +174,38 @@ async function sculpt(job, drawing) {
         `  ${saved.url}`
     );
 
+    // The service was asked, could not answer, and the pipeline built one
+    // instead. That is a success and a failure at the same time, and until now
+    // only the success left the building: the wall was handed a boat and the
+    // reason the AI gave nothing stayed in a log nobody was reading. Which is
+    // how a provider that had never once been switched on looked, from the
+    // outside, exactly like a provider that was working.
+    //
+    // So the reason travels with the model now, and the wall says so. Strict
+    // turns the fallback off altogether: no local boat, only the reason - which
+    // is what you want while finding out why a service is not answering, and
+    // not what you want at an exhibition.
+    if (outcome.pluginError) {
+      if (config.plugin.strict) {
+        console.warn(
+          `[3d] ${id} STRICT: not showing the local model. ${model3d.name} failed: ${outcome.pluginError}`
+        );
+
+        job.model = {
+          status: 'failed',
+          url: null,
+          provider: model3d.name,
+          error: outcome.pluginError,
+          strict: true,
+        };
+
+        events.broadcast('model', { id: job.id, model: job.model });
+        return;
+      }
+
+      job.aiError = outcome.pluginError;
+    }
+
     // Made, and saved, either way. Whether the wall is told is a separate
     // question: announcing a model swaps the display from the boat the browser
     // inflates to the one the server exported, and that is a change to what an
@@ -182,7 +214,15 @@ async function sculpt(job, drawing) {
     // MESH_PUBLISH.
     if (!expected && !config.mesh.publish) return;
 
-    job.model = { status: 'ready', url: saved.url, provider: sculpted.by || model3d.name };
+    job.model = {
+      status: 'ready',
+      url: saved.url,
+      provider: sculpted.by || model3d.name,
+
+      // Carried even on success, so a wall showing a locally built boat can say
+      // that the service was asked and what it said.
+      ...(outcome.pluginError ? { fellBackFrom: model3d.name, aiError: outcome.pluginError } : {}),
+    };
 
     events.broadcast('model', { id: job.id, model: job.model });
   } catch (err) {

@@ -27,6 +27,13 @@
       <p class="link-detail" id="linkDetail">Reconnecting…</p>
     </div>
 
+    <!-- What the 3D service did, when it did not do what was asked. Cleared
+         whenever one succeeds, so a working kiosk shows nothing here. -->
+    <div id="modelNotice" class="model-notice" hidden>
+      <p class="model-notice-title"></p>
+      <p class="model-notice-detail"></p>
+    </div>
+
     <!--
       Three.js is served straight out of node_modules; this turns the bare
       specifier its own add-ons use into a path a browser can fetch. No build
