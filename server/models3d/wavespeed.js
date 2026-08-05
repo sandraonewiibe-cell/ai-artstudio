@@ -203,6 +203,7 @@ async function settle({ apiKey, prediction, pollMs, deadline, say }) {
 
   let current = prediction;
   let polls = 0;
+  const waiting = Date.now();
 
   while (!['completed', 'failed'].includes(current.status)) {
     if (Date.now() > deadline) {
@@ -222,8 +223,15 @@ async function settle({ apiKey, prediction, pollMs, deadline, say }) {
       throw new Error(reason(payload, response.status, 'Could not read the prediction'));
     }
 
+    const was = current.status;
     current = (payload && payload.data) || {};
-    say(`poll ${polls}: ${current.status || 'unknown'}`);
+
+    // Only when something changes, and a heartbeat now and then. A model takes
+    // minutes, so saying "processing" every two seconds buries the two lines
+    // that matter under fifty that do not.
+    if (current.status !== was || polls % 15 === 0) {
+      say(`${Math.round((Date.now() - waiting) / 1000)}s, poll ${polls}: ${current.status || 'unknown'}`);
+    }
   }
 
   if (current.status === 'failed') {

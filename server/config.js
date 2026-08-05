@@ -227,10 +227,17 @@ module.exports = {
 
     /**
      * Generous, because nobody is waiting on it - the boat is already sailing.
+     *
+     * Five minutes, measured rather than guessed: at two it was still
+     * "processing" on a real drawing and was cut off mid-generation, which reads
+     * as the service failing when it was working perfectly well. An image-to-3D
+     * model reconstructs geometry and then bakes a texture onto it, and a minute
+     * or two of that is normal.
+     *
      * Long enough for a queue on a busy afternoon, short enough that a wedged
      * prediction is eventually let go rather than held for ever.
      */
-    timeoutMs: num(process.env.WAVESPEED_TIMEOUT_MS, 120 * 1000),
+    timeoutMs: num(process.env.WAVESPEED_TIMEOUT_MS, 300 * 1000),
 
     /**
      * Anything else the chosen model wants, as JSON.
