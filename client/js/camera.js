@@ -43,6 +43,19 @@ export class Camera {
     clearTimeout(this.retryTimer);
     this.retryTimer = null;
 
+    // Browsers only expose the camera on https or localhost. Opening the
+    // scanner at the LAN address the server prints (http://192.168.x.x) hides
+    // navigator.mediaDevices entirely, which looks like a missing camera.
+    if (!window.isSecureContext) {
+      const port = location.port ? `:${location.port}` : '';
+      this.onStatus(
+        'lost',
+        `Camera blocked: this page was opened from ${location.host} over plain http. ` +
+          `Open http://localhost${port}${location.pathname} on this machine instead.`,
+      );
+      return;
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
       this.onStatus('lost', 'This browser cannot access a camera.');
       return;
