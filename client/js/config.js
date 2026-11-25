@@ -495,7 +495,7 @@ export const DISPLAY = {
   recordMs: 8000,
 
   // How long the scanner shows "your boat is sailing" before re-arming.
-  sentMs: 4000,
+  sentMs: 2500,
 
   // How long the "that wasn't a boat" message is shown.
   rejectMs: 4500,

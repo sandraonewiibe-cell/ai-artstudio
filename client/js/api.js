@@ -27,9 +27,11 @@ export async function createSession(payload) {
  *
  * @param {string} id
  * @param {(job: object) => void} onProgress
- * @returns {Promise<object>} the finished job
+ * @param {{returnAtStage?: string}} options returnAtStage stops waiting as soon
+ *   as the job reaches that stage, leaving the server to finish it alone
+ * @returns {Promise<object>} the finished job, or the job at returnAtStage
  */
-export async function waitForSession(id, onProgress = () => {}) {
+export async function waitForSession(id, onProgress = () => {}, options = {}) {
   const deadline = Date.now() + POLL.timeoutMs;
   let interval = POLL.firstMs;
 
@@ -55,6 +57,7 @@ export async function waitForSession(id, onProgress = () => {}) {
     // caller handles, not a failure.
     if (job.status === 'done' || job.status === 'rejected') return job;
     if (job.status === 'error') throw new Error(job.error || 'Generation failed.');
+    if (options.returnAtStage && job.stage === options.returnAtStage) return job;
   }
 
   throw new Error('Generation timed out.');

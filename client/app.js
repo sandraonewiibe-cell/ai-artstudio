@@ -233,10 +233,19 @@ async function runSession(quad, insetRatio) {
 
     const session = await createSession(payload);
 
-    const job = await waitForSession(session.id, (update) => {
-      el.processStage.textContent = STAGE_LABELS[update.stage] || update.stage;
-      showDetectedText(update.text);
-    });
+    // Wait only until the drawing is accepted as a boat. Generating the image
+    // can take a minute or more, and it used to hold this screen the whole
+    // time, so the next visitor could not scan until the previous boat was
+    // finished. The server carries on alone and the display wall queues the
+    // boat when it is ready, so the scanner can go back to work at once.
+    const job = await waitForSession(
+      session.id,
+      (update) => {
+        el.processStage.textContent = STAGE_LABELS[update.stage] || update.stage;
+        showDetectedText(update.text);
+      },
+      { returnAtStage: 'generating' }
+    );
 
     if (job.status === 'rejected') {
       await showRejection(job.reason);
