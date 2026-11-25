@@ -2,6 +2,7 @@ import { EXTRACT } from './config.js';
 import { toLuminance, adaptiveInk, createCanvas, context2d } from './imaging.js';
 import { labelComponents } from './components.js';
 import { detectPaddles, erode, dilate } from './paddles.js';
+import { removeRuledLines } from './ruled.js';
 
 /**
  * Isolates the visitor's work from the cropped drawing area and returns it as
@@ -37,11 +38,16 @@ export function extractDrawing(pageCanvas) {
 
   // Ink is whatever is darker than the paper immediately around it, so uneven
   // lighting across the sheet does not become part of the drawing.
-  const { mask, reference, inkCount } = adaptiveInk(luma, width, height, {
+  const { mask, reference, inkCount: rawInk } = adaptiveInk(luma, width, height, {
     radius,
     offset: EXTRACT.ink.offset,
     margin,
   });
+
+  // Lined notebook paper: the rules are ink too, and would join the whole
+  // drawing into one shape spanning the page. A blank lined sheet then has
+  // nothing left, and is correctly read as having no drawing.
+  const inkCount = rawInk - removeRuledLines(mask, width, height);
 
   // Nothing drawn on it.
   if (inkCount < width * height * EXTRACT.ink.minRatio) return null;

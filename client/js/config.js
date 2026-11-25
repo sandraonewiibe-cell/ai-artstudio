@@ -211,6 +211,21 @@ export const EXTRACT = {
   // Still "wholly inside", which is what keeps it safe: a drawing that merely
   // reaches towards a corner has a bounding box that leaves it again.
   cornerZoneRatio: 0.2,
+
+  // The printed rules of lined or squared paper. See ruled.js.
+  rules: {
+    // A rule runs at least this fraction of the way across the page. A drawn
+    // line almost never does; a long hull line on a real scan reached 0.55.
+    minSpanRatio: 0.75,
+    // Gaps a faint rule may have and still count as one line, in pixels.
+    gapPx: 8,
+    // How far either side of a rule to look for the pen stroke crossing it.
+    bridgePx: 10,
+    // Leftover bits no bigger than this fraction of the page, lying mostly
+    // against a removed rule, are part of that rule too.
+    remnantMaxRatio: 0.0006,
+    remnantNearShare: 0.5,
+  },
   markerRemnantMinAreaRatio: 0.00015,
 
   // Padding around the extracted drawing, as a fraction of its longest edge.
