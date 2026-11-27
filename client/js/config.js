@@ -259,6 +259,15 @@ export const EXTRACT = {
     // against a removed rule, are part of that rule too.
     remnantMaxRatio: 0.0006,
     remnantNearShare: 0.5,
+    // How steeply a rule may run across the page, as sideways pixels per pixel
+    // along. A page curling under the camera tilts its rules; 0.25 is about 14
+    // degrees, and the bent rules on a real scan sloped about 0.12.
+    maxSlope: 0.25,
+    // Printed rules are grey and faint. Measured on real scans they were never
+    // more than 64 darker than the paper around them, and never more than about
+    // 4 levels from grey. Ink past either is pen, and is never removed.
+    penContrast: 70,
+    penChroma: 16,
   },
   markerRemnantMinAreaRatio: 0.00015,
 

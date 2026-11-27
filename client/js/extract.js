@@ -47,7 +47,9 @@ export function extractDrawing(pageCanvas) {
   // Lined notebook paper: the rules are ink too, and would join the whole
   // drawing into one shape spanning the page. A blank lined sheet then has
   // nothing left, and is correctly read as having no drawing.
-  const inkCount = rawInk - removeRuledLines(mask, width, height);
+  const ruled = new Uint8Array(width * height);
+  const inkCount =
+    rawInk - removeRuledLines(mask, width, height, { rgba: page.data, luma, reference, removed: ruled });
 
   // Nothing drawn on it.
   if (inkCount < width * height * EXTRACT.ink.minRatio) return null;
@@ -141,7 +143,7 @@ export function extractDrawing(pageCanvas) {
   const paint = paintedRegions(page, width, height, drawingBounds, discarded, strokes);
   for (let i = 0; i < fill.length; i += 1) if (paint.mask[i]) fill[i] = 1;
 
-  const base = { page, luma, strokes, width, height, reference };
+  const base = { page, luma, strokes, width, height, reference, ruled };
 
   const rendered = renderLayer({ ...base, fill, preserve, paint, rect });
   if (!rendered) return null;
@@ -1303,7 +1305,7 @@ function unionBounds(components) {
  * hull, and the paper immediately around and inside it.
  */
 function renderLayer({
-  page, luma, strokes, fill, width, height, reference, rect, preserve, paint,
+  page, luma, strokes, fill, width, height, reference, rect, preserve, paint, ruled,
 }) {
   const { x0, y0, x1, y1 } = rect;
 
@@ -1340,6 +1342,20 @@ function renderLayer({
         // is what makes writing on the boat come out as written: the letters
         // in their own ink, on the paper they were written on.
         const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+
+        // A printed notebook rule crossing the inside of the hull. It is darker
+        // than the paper, so it would otherwise be taken for ink and drawn as a
+        // dark stripe across the boat. It is the paper's, not the visitor's, so
+        // it is shown as the paper around it.
+        if (ruled && ruled[si] && !strokes[si]) {
+          const level = Math.round(reference[si]);
+          dst[di] = level;
+          dst[di + 1] = level;
+          dst[di + 2] = level;
+          dst[di + 3] = 255;
+          inkPixels += 1;
+          continue;
+        }
 
         // A coloured-in area comes out as one solid colour, across the whole of
         // it. Photographed crayon is never one colour - it is darker where the

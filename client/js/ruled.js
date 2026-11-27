@@ -15,12 +15,20 @@ import { labelComponents } from './components.js';
  * Where a pen stroke crosses a rule, the pixels in between are put back, so an
  * outline cut by the rules stays closed and its inside still fills.
  *
+ * Printed rules are grey and faint. Anything along one that is coloured, or
+ * darker than a rule ever prints, is the visitor's pen lying on or beside it -
+ * a deck line drawn along a rule, say - and stays.
+ *
  * Changes the mask in place.
  *
  * @param {Uint8Array} mask 1 where there is ink
+ * @param {{rgba?: Uint8ClampedArray, luma?: Uint8Array, reference?: Float32Array|Uint8Array,
+ *          removed?: Uint8Array}} page
+ *   the page's colour, brightness and local paper level, to tell pen from print;
+ *   `removed`, if given, is marked with every pixel taken out as part of a rule
  * @returns {number} how many ink pixels were removed
  */
-export function removeRuledLines(mask, width, height) {
+export function removeRuledLines(mask, width, height, page = {}) {
   const { minSpanRatio, gapPx, bridgePx } = EXTRACT.rules;
 
   const vertical = longLines(mask, width, height, true, Math.round(height * minSpanRatio), gapPx);
@@ -29,7 +37,7 @@ export function removeRuledLines(mask, width, height) {
   const rule = new Uint8Array(width * height);
   let found = 0;
   for (let i = 0; i < rule.length; i += 1) {
-    if (vertical[i] || horizontal[i]) {
+    if ((vertical[i] || horizontal[i]) && !isPen(page, i)) {
       rule[i] = 1;
       found += 1;
     }
@@ -50,12 +58,26 @@ export function removeRuledLines(mask, width, height) {
 
       if (!bridged) {
         mask[i] = 0;
+        if (page.removed) page.removed[i] = 1;
         removed += 1;
       }
     }
   }
 
-  return removed + dropRemnants(mask, rule, width, height);
+  return removed + dropRemnants(mask, rule, width, height, page.removed);
+}
+
+/** Coloured, or darker than printed rules come out: the visitor's pen. */
+function isPen({ rgba, luma, reference }, i) {
+  const { penContrast, penChroma } = EXTRACT.rules;
+  if (luma && reference && reference[i] - luma[i] > penContrast) return true;
+  if (rgba) {
+    const r = rgba[i * 4];
+    const g = rgba[i * 4 + 1];
+    const b = rgba[i * 4 + 2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) > penChroma) return true;
+  }
+  return false;
 }
 
 /**
@@ -63,7 +85,7 @@ export function removeRuledLines(mask, width, height) {
  * a faint stretch - lie up against the rule that was removed. A stroke that
  * merely crosses a rule mostly does not.
  */
-function dropRemnants(mask, rule, width, height) {
+function dropRemnants(mask, rule, width, height, removedOut) {
   const { remnantMaxRatio, remnantNearShare } = EXTRACT.rules;
   const maxArea = width * height * remnantMaxRatio;
   const { components, labels } = labelComponents(mask, width, height);
@@ -104,6 +126,7 @@ function dropRemnants(mask, rule, width, height) {
   for (let i = 0; i < mask.length; i += 1) {
     if (mask[i] && drop.has(labels[i])) {
       mask[i] = 0;
+      if (removedOut) removedOut[i] = 1;
       dropped += 1;
     }
   }
@@ -179,31 +202,42 @@ function longLines(mask, width, height, vertical, minSpan, gap) {
   return marked;
 }
 
-/** How far ahead to look, and how far sideways a rule may drift by then. */
+/** How far ahead to look along a rule, in pixels. */
 const STRAIGHT_PROBES = [15, 30, 45];
-// One pixel sideways per this many along. Loose enough for a rule bowed by a
-// curling page, still tight enough to reject the slanted end of a hull.
-const STRAIGHT_DRIFT = 12;
 
-/** Ink continues the same line at each probe distance in one direction. */
+/**
+ * Ink continues the same straight line at each probe distance in one
+ * direction.
+ *
+ * The line may slope - a page curling under the camera tilts its rules - but
+ * by no more than `maxSlope`, and it must keep the slope it started with. A
+ * rule does; the end of a hull, which bends, or meets the rule at an angle,
+ * does not.
+ */
 function straightHere(mask, at, along, across, a, c, sign) {
-  for (const k of STRAIGHT_PROBES) {
-    const drift = 1 + Math.floor(k / STRAIGHT_DRIFT);
-    let seen = false;
+  const { maxSlope } = EXTRACT.rules;
+  let slope = null;
 
-    for (let slack = -2; slack <= 2 && !seen; slack += 1) {
+  for (const k of STRAIGHT_PROBES) {
+    const expected = slope === null ? 0 : slope * k;
+    const tolerance = slope === null ? maxSlope * k + 1 : 2 + k / 30;
+    let best = null;
+
+    for (let slack = -2; slack <= 2; slack += 1) {
       const p = a + sign * (k + slack);
       if (p < 0 || p >= along) continue;
-      for (let s = -drift; s <= drift; s += 1) {
+      const lo = Math.floor(expected - tolerance);
+      const hi = Math.ceil(expected + tolerance);
+      for (let s = lo; s <= hi; s += 1) {
         const n = c + s;
         if (n >= 0 && n < across && mask[at(p, n)]) {
-          seen = true;
-          break;
+          if (best === null || Math.abs(s - expected) < Math.abs(best - expected)) best = s;
         }
       }
     }
 
-    if (!seen) return false;
+    if (best === null) return false;
+    if (slope === null) slope = best / k;
   }
   return true;
 }
