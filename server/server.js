@@ -9,7 +9,6 @@ const recordings = require('./recordings');
 const ratelimit = require('./ratelimit');
 const settings = require('./settings');
 const { publicBase, candidates } = require('./network');
-const preview = require('./pipeline3d/preview');
 
 const app = express();
 
@@ -94,68 +93,7 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(config.paths.client, 'admin.html'));
 });
 
-/**
- * A fifth, for looking at the geometry the pipeline builds.
- *
- * Development only: it builds a mesh on demand, and it lists what visitors have
- * drawn. See server/pipeline3d/preview.js for why a listing is worth withholding
- * even though the files themselves are already served.
- */
-app.get('/preview', (req, res) => {
-  if (!preview.available()) return res.status(404).send('Not available in production.');
-  return res.sendFile(path.join(config.paths.client, 'preview.html'));
-});
-
-app.get('/api/preview/drawings', (req, res) => {
-  if (!preview.available()) return res.status(404).json({ error: 'not available' });
-  return res.json({ drawings: preview.list() });
-});
-
-app.get('/api/preview/drawing/:name', (req, res) => {
-  if (!preview.available()) return res.status(404).json({ error: 'not available' });
-
-  try {
-    res.type('image/png').send(preview.drawing(req.params.name));
-  } catch (err) {
-    res.status(404).json({ error: err.message });
-  }
-});
-
-app.get('/api/preview/glb/:name', (req, res) => {
-  if (!preview.available()) return res.status(404).json({ error: 'not available' });
-
-  try {
-    res.type('model/gltf-binary').send(preview.glb(req.params.name));
-  } catch (err) {
-    res.status(404).json({ error: err.message });
-  }
-});
-
-app.get('/api/preview/mesh/:name', async (req, res) => {
-  if (!preview.available()) return res.status(404).json({ error: 'not available' });
-
-  try {
-    res.json(await preview.build(req.params.name));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
 app.use(express.static(config.paths.client));
-
-/**
- * Three.js, straight out of node_modules.
- *
- * There is no build step here and there is not going to be one - the point of
- * this project is that the client is files a browser can read. An import map on
- * the display page turns the bare `three` specifier into these two folders, so
- * the library is used exactly as it ships and upgrading it is npm's business.
- *
- * Only the display screen asks for any of it.
- */
-const THREE_ROOT = path.join(config.paths.root, 'node_modules', 'three');
-app.use('/vendor/three', express.static(path.join(THREE_ROOT, 'build')));
-app.use('/vendor/three-addons', express.static(path.join(THREE_ROOT, 'examples', 'jsm')));
 
 // Static asset / output folders
 app.use('/assets', express.static(config.paths.assets));
@@ -309,52 +247,6 @@ app.post('/api/media', adminLimit, adminOnly, mediaBody, (req, res) => {
   }
 });
 
-/**
- * The 3D stage, and whether it can actually run.
- *
- * Says more than its name on purpose. A provider that is loaded but has no
- * credential looks identical to one that is working right up until the moment a
- * visitor's boat quietly fails to become a model, and the first place anyone
- * looks is this line.
- */
-function describe3D() {
-  const name = pipeline.info.model3d;
-  if (name === 'none') return 'none (2D only)';
-
-  if (name === 'replicate') {
-    const { token, model, version } = config.replicate;
-    const which = version ? `version ${version.slice(0, 8)}` : model;
-    return token
-      ? `${name} - ${which} - token present, ready`
-      : `${name} - ${which} - NO TOKEN, so nothing will be generated`;
-  }
-
-  if (name === 'wavespeed') {
-    const { apiKey, model, timeoutMs } = config.wavespeed;
-    return apiKey
-      ? `${name} - ${model} - key present, ready (timeout ${Math.round(timeoutMs / 1000)}s)`
-      : `${name} - ${model} - NO WAVESPEED_API_KEY, so nothing will be generated`;
-  }
-
-  if (name === 'tripo') {
-    const { apiKey, version, timeoutMs } = config.tripo;
-    const which = version || 'its current model';
-    return apiKey
-      ? `${name} - ${which} - key present, ready (timeout ${Math.round(timeoutMs / 1000)}s)`
-      : `${name} - ${which} - NO TRIPO_API_KEY, so nothing will be generated`;
-  }
-
-  if (name === 'huggingface') {
-    const { space, token, api } = config.huggingface;
-    if (!space) return `${name} - NO HF_SPACE_URL, so nothing will be generated`;
-
-    return `${name} - ${space}${api ? ` ${api}` : ' (endpoint chosen from the Space)'}` +
-      `${token ? ' - token present' : ' - anonymous'}`;
-  }
-
-  return name;
-}
-
 function describeLogos(saved) {
   const on = ['left', 'right'].filter((side) => saved.logos[side].enabled);
   return on.length ? on.join(' + ') : 'off';
@@ -400,7 +292,7 @@ app.use((err, req, res, next) => {
 });
 
 // Make sure output folders exist before the first visitor.
-['uploads', 'images', 'videos', 'models', 'media', 'data'].forEach((kind) =>
+['uploads', 'images', 'videos', 'media', 'data'].forEach((kind) =>
   storage.ensureDir(config.paths[kind])
 );
 
@@ -422,9 +314,6 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`  image provider: ${pipeline.info.provider}`);
   console.log(`  ocr engine:     ${pipeline.info.ocr}`);
   console.log(`  classifier:     ${pipeline.info.classifier}`);
-  console.log(`  sketch enhancer:${pipeline.info.enhancer}`);
-  console.log(`  3D provider:    ${describe3D()}`);
-  console.log(`  3D pipeline:    ${pipeline.info.pipeline3d}`);
 
   // The QR code carries the first of these. If a phone cannot reach it, it is
   // on one of the others - set PUBLIC_HOST to whichever matches the network the

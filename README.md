@@ -281,7 +281,7 @@ Measuring the slope at a *point* instead looked right on paper but pinned the bo
 
 ### Two honest limits
 
-**This is not 3D geometry.** It is a flat image bent convincingly. Real 3D would need depth estimation from an image-to-3D model — a provider-level feature, not something canvas rendering can do.
+**This is not 3D geometry.** It is the visitor's flat drawing, bent convincingly by the waves.
 
 **The waves are simulated, not read from the video.** Matching the actual footage would mean optical-flow analysis every frame: expensive and fragile. The numbers in `WAVES` are there to be tuned by eye against whatever background is in use — the eye accepts an approximation readily, provided the motion is unhurried and irregular. If you change `bg.mp4` for footage with a different swell, adjust `wavelength` and `periodMs` to suit.
 

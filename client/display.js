@@ -35,34 +35,9 @@ stage.overlay = overlay;
 let busy = false;
 const queue = [];
 
-/** Whose boat is on the wall, so a model arriving late can find its crossing. */
-let playing = null;
-
 function showNotice(visible, detail) {
   link.hidden = !visible;
   if (detail) linkDetail.textContent = detail;
-}
-
-/**
- * What the 3D service did, in the corner of the wall.
- *
- * Small and out of the way, because a visitor is looking at their boat and not
- * at this - but on the screen rather than only in a console, because a console
- * on an unattended kiosk is a place nothing gets read. Passing null clears it,
- * so a working service leaves no mark.
- */
-function showModelNotice(title, detail) {
-  const box = document.getElementById('modelNotice');
-  if (!box) return;
-
-  if (!title) {
-    box.hidden = true;
-    return;
-  }
-
-  box.hidden = false;
-  box.querySelector('.model-notice-title').textContent = title;
-  box.querySelector('.model-notice-detail').textContent = detail || '';
 }
 
 /** Recording covers the opening of the crossing, never more than all of it. */
@@ -70,17 +45,9 @@ const RECORD_MS = Math.min(DISPLAY.recordMs, DISPLAY.holdMs);
 
 async function play(job) {
   busy = true;
-  playing = job;
 
   try {
     await stage.show(job);
-
-    // If a model was already made for this drawing - a rescan, or a crossing
-    // that came round again - it is already parsed and goes up with the boat
-    // rather than after it.
-    if (job.model && job.model.status === 'ready') {
-      await stage.sculpt(job.model.url);
-    }
 
     const recording = recorder.start();
     if (!recording) console.warn('[display] continuing without a recording');
@@ -100,59 +67,9 @@ async function play(job) {
     if (recorder.recording) await recorder.stop();
   } finally {
     busy = false;
-    playing = null;
     const next = queue.shift();
     if (next) play(next);
   }
-}
-
-/**
- * A model finished on the server.
- *
- * It is loaded whatever is happening, so it is parsed and on the GPU before it
- * is ever needed. If it belongs to the boat currently crossing, it takes over
- * mid-flight - which is the usual case, because a model takes longer to make
- * than a visitor will stand and watch.
- */
-async function modelArrived(id, model) {
-  if (!model) return;
-
-  // Every outcome says so, on the screen as well as on the console. A service
-  // that is failing every time used to look identical to one that was working:
-  // the wall showed a boat either way and the reason sat in a log.
-  if (model.status !== 'ready' || !model.url) {
-    const why = model.error || `status=${model.status}`;
-    console.warn(`[3d] announced for ${id.slice(0, 8)} but not usable: ${why}`);
-
-    showModelNotice(
-      model.strict
-        ? `${model.provider || '3D service'} failed - no model shown`
-        : `${model.provider || '3D service'} gave no model`,
-      why
-    );
-    return;
-  }
-
-  // Built here because the service could not. The boat is real and so is the
-  // reason it is not the one that was asked for.
-  if (model.aiError) {
-    console.warn(`[3d] ${id.slice(0, 8)} fell back from ${model.fellBackFrom}: ${model.aiError}`);
-    showModelNotice(`${model.fellBackFrom} failed - showing the locally built boat`, model.aiError);
-  } else {
-    showModelNotice(null);
-  }
-
-  console.log(`[3d] announced for ${id.slice(0, 8)}: ${model.url} (by ${model.provider})`);
-
-  // Parsed and on the GPU straight away, whether or not it is wanted yet.
-  await stage.preloadModel(model.url);
-
-  if (!playing || playing.id !== id) {
-    console.log(`[3d] ready for ${id.slice(0, 8)}, held for its next crossing`);
-    return;
-  }
-
-  await stage.sculpt(model.url);
 }
 
 /** Stops the recorder after RECORD_MS and posts what it captured. */
@@ -210,12 +127,6 @@ connect(
     if (event.type === 'settings' && event.settings) {
       applyBackground(event.settings);
       overlay.apply(event.settings);
-      return;
-    }
-
-    // A generated model, which arrives on its own after the boat it belongs to.
-    if (event.type === 'model' && event.id) {
-      modelArrived(event.id, event.model);
       return;
     }
 

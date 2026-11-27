@@ -31,7 +31,7 @@ import { labelComponents } from './components.js';
 /**
  * Alpha at or above which a pixel is part of the drawing.
  *
- * The same floor `seal.js` and `inflate.js` use, so every stage of the display
+ * The same floor `seal.js` uses, so every stage of the display
  * agrees on where the boat ends and the page began.
  */
 const ALPHA_FLOOR = 40;

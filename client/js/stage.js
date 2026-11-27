@@ -1,22 +1,7 @@
-import { DISPLAY, WAVES, PADDLES, MODEL3D, GLB, ANIMATE, FLOAT } from './config.js';
-import { Boat3D } from './boat3d.js';
+import { DISPLAY, WAVES, PADDLES, FLOAT } from './config.js';
 import { sealHoles } from './seal.js';
 import { measureHull } from './waterline.js';
 import { surveyWater } from './surface.js';
-
-/**
- * Three.js, fetched the first time a model actually needs it.
- *
- * Deliberately not imported at the top. The library and its loader are the best
- * part of a megabyte, and a kiosk with the 3D pipeline switched off - which is
- * the default - should not be downloading it on every display boot to render
- * nothing. Nothing is fetched until a GLB exists to put in it.
- */
-let gl = null;
-function boatgl() {
-  if (!gl) gl = import('./boatgl.js');
-  return gl;
-}
 
 /**
  * The LED screen, drawn on a canvas.
@@ -33,8 +18,7 @@ function boatgl() {
  * hull pitches with the slope of the surface, and a squashed mirror image
  * wobbles underneath it.
  *
- * This is not geometry - it is a flat image being bent convincingly. Real 3D
- * would need depth estimation from an image-to-3D model.
+ * This is not geometry - it is a flat image being bent convincingly.
  */
 
 const BASE_WIDTH = 1920;
@@ -122,20 +106,6 @@ export class Stage {
     /** Which background the survey was of, so a new one is surveyed again. */
     this.surveyed = null;
 
-    // Built once and reused. Creating a WebGL context per visitor would leak
-    // contexts until the browser started refusing them.
-    this.model = MODEL3D.enabled ? Boat3D.create(1024, 1024) : null;
-    this.modelReady = false;
-
-    /**
-     * The renderer for a generated GLB, when the pipeline has made one.
-     *
-     * Built lazily, on the first model that actually arrives - a kiosk running
-     * without the 3D pipeline should never make a WebGL context it has nothing
-     * to put in. Null means the flat boat, which is also what happens if WebGL
-     * is unavailable or a file will not parse.
-     */
-    this.gl = null;
   }
 
   start() {
@@ -167,8 +137,8 @@ export class Stage {
     // A hull the visitor shaded faintly can arrive with see-through patches in
     // the middle of it, and the wall would show the lake through them. Closed
     // up here, with the colour that surrounds each gap, before anything is
-    // drawn or built from it - so the flat boat, its reflection and the model
-    // all get the same sealed drawing. Nothing outside the sketch is touched.
+    // drawn from it - so the boat and its reflection get the same sealed
+    // drawing. Nothing outside the sketch is touched.
     this.boat = sealHoles(image);
     this.paddles = [];
     this.splashes = [];
@@ -201,100 +171,9 @@ export class Stage {
       console.log(`[stage] ${this.paddles.length} oar(s) working the water`);
     }
 
-    // Inflate the drawing into a solid. Built from the whole drawing, oars
-    // included: separate oars cannot be made to line up with a rotated hull, so
-    // in 3D they are part of the model rather than animated on top.
-    this.modelReady = false;
-    if (this.model) {
-      try {
-        this.modelReady = this.model.build(this.boat);
-      } catch (err) {
-        console.warn('[stage] 3D build failed, showing the flat boat:', err.message);
-        this.modelReady = false;
-      }
-    }
-
     this.text = job.text || null;
     this.startedAt = performance.now();
     this.lastFrameAt = this.startedAt;
-  }
-
-  /**
-   * Shows a generated model instead of the flat drawing, from now on.
-   *
-   * Called when one finishes - which is usually after the boat is already
-   * crossing, so it takes over mid-flight.
-   *
-   * Every way this can fail ends in the flat boat carrying on: no WebGL, a file
-   * that will not parse, a library that will not load. The drawing is always
-   * there to fall back to, and it is never taken away first.
-   *
-   * @param {string|null} url
-   * @returns {Promise<boolean>} whether the model is now on the wall
-   */
-  async sculpt(url) {
-    if (!url || !GLB.enabled) {
-      if (this.gl) this.gl.clear();
-      return false;
-    }
-
-    try {
-      const { BoatGL, loadModel } = await boatgl();
-
-      const scene = await loadModel(url);
-      if (!scene) {
-        console.warn('[3d] falling back to the flat boat: nothing parsed');
-        return false;
-      }
-
-      if (!this.gl) this.gl = BoatGL.create();
-      if (!this.gl) {
-        console.warn('[3d] falling back to the flat boat: no renderer');
-        return false;
-      }
-
-      this.gl.show(scene);
-
-      if (!this.sculpted) {
-        console.warn('[3d] falling back to the flat boat: the model went in but is not ready');
-        return false;
-      }
-
-      console.log('[3d] shown - the model has replaced the flat boat');
-      return true;
-    } catch (err) {
-      console.error(`[3d] FAILED at display: ${err.message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Fetches, parses, rigs and compiles a model now, so showing it later costs
-   * nothing.
-   *
-   * All of it - including making the WebGL context, which is not cheap either -
-   * happens while the model is still only an announcement. By the time it goes
-   * on the wall there is nothing left to do but draw it.
-   */
-  async preloadModel(url) {
-    if (!url || !GLB.enabled) return;
-
-    try {
-      const { BoatGL, preload } = await boatgl();
-
-      const scene = await preload(url);
-      if (!scene) return;
-
-      if (!this.gl) this.gl = BoatGL.create();
-      if (this.gl) this.gl.warm(scene);
-    } catch (err) {
-      console.warn('[stage] could not preload the model:', err.message);
-    }
-  }
-
-  /** True when there is a model to draw instead of the drawing. */
-  get sculpted() {
-    return Boolean(this.gl && this.gl.ready);
   }
 
   /**
@@ -389,7 +268,6 @@ export class Stage {
   clear() {
     this.boat = null;
     this.hull = null;
-    if (this.gl) this.gl.clear();
     this.paddles = [];
     this.splashes = [];
     this.text = null;
@@ -486,11 +364,6 @@ export class Stage {
     const delta = Math.max(0, Math.min(100, now - this.lastFrameAt));
     this.lastFrameAt = now;
 
-    // A generated model takes over from the drawing when there is one. Each of
-    // the three ways of showing a boat reflects differently, so the reflection
-    // is chosen with the boat rather than assumed.
-    const sculpted = this.sculpted;
-
     // Where the bottom of the hull is on the wall. The shadow hangs off it, and
     // the deepest water the boat displaces is there rather than at the surface.
     const keelY = centreY - boatH / 2 + (this.hull ? this.hull.bottom : 1) * boatH;
@@ -506,12 +379,6 @@ export class Stage {
     // past it - which is all any of them ever is.
     this.drawWaterMarks(this.ctx, { ...shadow, waterline, elapsed }, 0);
 
-    if (sculpted) this.renderSculpt(lift, tilt, elapsed);
-
-    // The trail the boat has left. Behind it, so it belongs under the ripples
-    // that are directly beneath the hull.
-    if (sculpted) this.drawWake(centreX, waterline, boatW, elapsed, progress);
-
     // The rings that used to spread out from under the hull are not drawn.
     //
     // They were meant to read as ripples and did not. On a photographed lake
@@ -524,13 +391,7 @@ export class Stage {
     // white stroke on a bright background was, and it wants rebuilding as a
     // distortion of the water rather than a line drawn over it.
 
-    if (sculpted) {
-      this.drawSculpt(centreX, centreY, boatW, boatH);
-    } else if (this.modelReady) {
-      this.drawModel(centreX, centreY, boatW, boatH, tilt, elapsed);
-    } else {
-      this.drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
-    }
+    this.drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed);
 
     // The water, in front of the part of the boat that is in it.
     //
@@ -545,15 +406,11 @@ export class Stage {
     // The reflection lies *on* the surface, so it goes over the water rather
     // than under it - after the veil, not before. It used to be drawn first, and
     // was then partly covered by the hull it was supposed to be a reflection of.
-    //
-    // Whatever drew the boat this frame is what gets reflected, so every way of
-    // showing a boat reflects, and reflects the boat that is actually there.
     this.drawReflection(this.mirrorSource(boatW, boatH), centreX, centreY, waterline, tilt, elapsed);
 
-    // The water reacts to the blades whichever boat is on it. The positions
-    // came off the visitor's drawing and the model was made from that same
-    // drawing, so they still fall along the boat.
-    if (this.paddles.length && !this.modelReady) {
+    // The water reacts to the blades. The positions came off the visitor's
+    // drawing, so they fall along the boat.
+    if (this.paddles.length) {
       this.workTheWater(centreX, centreY, boatW, boatH, tilt, lift, elapsed);
     }
 
@@ -765,36 +622,6 @@ export class Stage {
    * the whole drawing tilting like a signboard.
    */
   /**
-   * The inflated 3D model, riding the same water as the flat version.
-   *
-   * The boat is seen broadside, so the wave's tilt becomes roll - the bow lifting
-   * as the stern drops - and a slow nod is added on top so it is never rigid.
-   * The model renders to its own transparent canvas and is composited here,
-   * which keeps the 2D stage (ripples, reflection, name) untouched and means the
-   * recording still captures everything.
-   */
-  /**
-   * Poses the generated model on the water and renders it once.
-   *
-   * The same numbers that bend the flat drawing drive this: how far the surface
-   * has lifted under the hull, and how it is sloping. Rendered once per frame,
-   * then blitted twice - right way up, and upside down for the reflection - so
-   * the mirror costs a copy rather than a second pass over the mesh.
-   */
-  renderSculpt(lift, tilt, elapsed) {
-    this.gl.render({
-      heave: (lift / this.canvas.height) * GLB.heave,
-      roll: tilt,
-      elapsed,
-    });
-  }
-
-  drawSculpt(centreX, centreY, boatW, boatH) {
-    const size = Math.max(boatW, boatH) * GLB.cover;
-    this.ctx.drawImage(this.gl.canvas, centreX - size / 2, centreY - size / 2, size, size);
-  }
-
-  /**
    * Everything the boat does to the water it is sitting in.
    *
    * Gathered into one call because they all want the same two things: to be
@@ -938,43 +765,11 @@ export class Stage {
   }
 
   /**
-   * The picture the water reflects: the visitor's sketch, always.
-   *
-   * The same drawing that is on the wall, mirrored - which is what a reflection
-   * on water is. Not a re-render, not a second version of the boat, not the
-   * lit and yawed model: the sketch, as scanned, upside down in the lake.
-   *
-   * That it does not depend on which of the three renderers drew the boat is
-   * the point twice over. It is the same picture the visitor is looking at, and
-   * it works whichever way the boat is being shown - where before there was one
-   * reflection for a generated model, one for the flat drawing, and none at all
-   * for the inflated one, which is the path the wall actually runs.
-   *
-   * The box is the flat boat's, because that is the room the boat occupies
-   * however it is drawn - the model is built from this drawing and rendered to
-   * very nearly the same footprint.
+   * The picture the water reflects: the visitor's sketch, mirrored - which is
+   * what a reflection on water is.
    */
   mirrorSource(boatW, boatH) {
     return { image: this.boat, width: boatW, height: boatH };
-  }
-
-  drawModel(centreX, centreY, boatW, boatH, tilt, elapsed) {
-    const nod =
-      Math.sin((elapsed / MODEL3D.nodPeriodMs) * Math.PI * 2) *
-      ((MODEL3D.nodDegrees * Math.PI) / 180);
-
-    this.model.render({ roll: tilt, pitch: nod, yaw: 0 });
-
-    // Square, and generous: rotation and perspective push the model's corners
-    // out past where the flat image sat.
-    const size = Math.max(boatW, boatH) * MODEL3D.canvasCover;
-    this.ctx.drawImage(
-      this.model.canvas,
-      centreX - size / 2,
-      centreY - size / 2,
-      size,
-      size
-    );
   }
 
   drawHull(centreX, centreY, boatW, boatH, tilt, lift, slope, elapsed) {
@@ -1168,49 +963,6 @@ export class Stage {
     cctx.restore();
 
     return copy;
-  }
-
-  /**
-   * The wake: the water the boat has already been through.
-   *
-   * Arcs shed behind the hull, widening and fading as they fall astern. They
-   * trail towards where the boat came from, which is the left - the crossing
-   * runs left to right - so the boat always looks like it is going somewhere
-   * rather than sitting on a moving background.
-   *
-   * Nothing is simulated. Each arc is a function of how long ago it was shed,
-   * which costs a few ellipses a frame and reads correctly at the back of a
-   * hall.
-   */
-  drawWake(centreX, baseY, boatW, elapsed, progress) {
-    const { ctx } = this;
-    const { count, periodMs, spread, opacity, lineWidth } = ANIMATE.wake;
-
-    // Nothing to leave behind until the boat has actually moved.
-    const travelled = Math.min(1, progress * 4);
-    if (travelled <= 0.01) return;
-
-    ctx.save();
-    ctx.lineWidth = lineWidth;
-
-    for (let i = 0; i < count; i += 1) {
-      const age = (((elapsed / periodMs) + i / count) % 1 + 1) % 1;
-
-      // Astern, and further with every moment.
-      const behind = boatW * (0.35 + spread * age);
-      const rx = boatW * (0.18 + 0.5 * age);
-      const ry = rx * 0.22;
-
-      const fade = (1 - age) * opacity * travelled;
-      if (fade <= 0.01) continue;
-
-      ctx.strokeStyle = `rgba(255, 255, 255, ${fade.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.ellipse(centreX - behind, baseY + ry * 0.5, rx, ry, 0, Math.PI * 0.15, Math.PI * 0.85);
-      ctx.stroke();
-    }
-
-    ctx.restore();
   }
 
   /**
