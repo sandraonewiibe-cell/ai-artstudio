@@ -27,7 +27,30 @@ export const DETECTION = {
   // with a marker missing nothing fires at all. The timer is really only
   // waiting out the wobble as the sheet is set down. Raise it if hands are
   // getting into shots.
-  stableMs: 300,
+  //
+  // Paper mode has no markers to do that guarding, so this is longer: long
+  // enough that a sheet being slid into place, or let go of, is not caught
+  // mid-move. Hands are checked separately - see `hands` below.
+  stableMs: 800,
+
+  // A hand on the sheet. Something solid, much darker than the paper, reaching
+  // in from the sheet's edge, blocks capture until it has gone.
+  hands: {
+    // How much darker than the paper counts. Skin under room light is well
+    // past this; a pencil shadow is not.
+    darkerBy: 45,
+    // ...or this much warmer (red over blue) than the paper. Skin is warm;
+    // paper, pencil and blue or black pen are not.
+    warmerBy: 35,
+    // A hand lies on the paper, so paper surrounds at least this share of its
+    // outline. Table showing past the paper's edge borders it on one side only.
+    minPaperShare: 0.5,
+    // Smallest patch that counts, as a fraction of the sheet. A fingertip at
+    // the edge is about this.
+    minAreaRatio: 0.006,
+    // How far in from the sheet's edge counts as "reaching in from outside".
+    borderBand: 0.12,
+  },
 
   // Per-pixel motion below which the scene counts as "still", after the global
   // brightness shift has been removed - see motionBetween() in imaging.js.
@@ -40,6 +63,17 @@ export const DETECTION = {
   // before another capture can happen. This is what stops one visitor's sheet
   // from triggering repeatedly.
   removalFrames: 6,
+
+  // ...or the sheet settles again with this share of it changed from
+  // what was captured: a notebook page turned, or a new sketch drawn, without
+  // the notebook ever leaving the camera. Below it, the same drawing is left
+  // where it was and is not captured twice.
+  //
+  // Measured on real kiosk scans: a different page changed at least 0.10 of
+  // the sheet, the same drawing put back changed 0.065, and the same page
+  // bumped a few pixels up to 0.12. Set to catch every new page; a notebook
+  // knocked hard enough may scan its drawing a second time.
+  newContentShare: 0.08,
 
   // Quiet period after the sheet leaves, before scanning re-arms.
   cooldownMs: 700,
@@ -532,8 +566,8 @@ export const PAPER = {
   minCoverage: 0.15,
   maxCoverage: 0.9,
 
-  // The sheet's edges must all be inside the frame, with at least this much
-  // clear on every side.
+  // The sheet's edges should be inside the frame, with at least this much
+  // clear on each side.
   //
   // This is what stops the whole camera view being mistaken for the sheet. On a
   // pale table the only dark thing in shot is the drawing itself, so the bright
@@ -541,6 +575,12 @@ export const PAPER = {
   // "detected" and cropped as if it were the paper. If the edges are not
   // visible the paper genuinely cannot be located, and declining is correct.
   minFrameMargin: 0.02,
+
+  // ...except on this many sides, where the sheet may run past the edge of the
+  // view. A notebook held close to the camera runs off the bottom and one side.
+  // The table still has to show on the others, so the paper's position is
+  // known; with paper everywhere there is nothing to locate it by.
+  maxSidesOffFrame: 2,
 
   // Minimum brightness gap between the sheet and what is under it. This is the
   // check that fails on a white table, and the number to look at first if

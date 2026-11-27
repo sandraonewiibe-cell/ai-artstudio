@@ -52,7 +52,8 @@ const STAGE_LABELS = {
 const HINTS = {
   idle: 'PLACE YOUR PAPER INSIDE THE FRAME',
   settling: 'HOLD STILL…',
-  holding: 'PLEASE TAKE YOUR SHEET',
+  hands: 'MOVE YOUR HANDS AWAY',
+  holding: 'DONE – TURN THE PAGE OR TAKE YOUR SHEET',
   cooldown: 'READY IN A MOMENT',
   paused: 'SCANNING PAUSED',
 };
@@ -154,7 +155,8 @@ function tick(now) {
   const reading = scanner.update(el.preview, now);
 
   if (mode === 'scanning') {
-    setScanState(reading.state === 'ready' ? 'settling' : reading.state);
+    if (reading.hands) setScanState('hands');
+    else setScanState(reading.state === 'ready' ? 'settling' : reading.state);
     setProgress(reading.progress);
 
     if (reading.state === 'ready' && reading.quad) {
