@@ -179,7 +179,13 @@ const DEFAULT_BACKGROUND = '/assets/background/bg.mp4';
 function applyBackground(settings) {
   const chosen = settings.background || {};
   const wanted = chosen.url || DEFAULT_BACKGROUND;
-  const isImage = Boolean(chosen.url) && chosen.type === 'image';
+  // The panel saves which kind it was. A server that has not been restarted
+  // since pictures were allowed drops that on save, so the file's own name is
+  // asked as well - a PNG sent to the video player would leave the old one up.
+  const isImage =
+    Boolean(chosen.url) &&
+    (chosen.type === 'image' ||
+      (chosen.type !== 'video' && /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(chosen.url)));
 
   if (isImage) {
     if (backgroundImage.getAttribute('src') !== wanted) backgroundImage.src = wanted;
