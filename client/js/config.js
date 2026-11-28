@@ -940,6 +940,51 @@ export const WAVES = {
   },
 };
 
+/**
+ * The rocket launch, shown instead of the boat when the wall's scene is space.
+ * See launch.js.
+ */
+export const LAUNCH = {
+  // The rocket's box, as fractions of the wall.
+  maxWidth: 0.26,
+  maxHeight: 0.42,
+
+  // Where the bottom of the rocket stands before lift-off, down the wall.
+  padY: 0.9,
+
+  // On the pad with the engine lighting, shaking, before it moves.
+  igniteMs: 1800,
+  // Height of the shake, as a fraction of the wall.
+  shake: 0.004,
+
+  // From lift-off to clear of the top of the wall. Shorter than the crossing,
+  // and inside the recording, so the clip shows the whole flight.
+  ascentSeconds: 5.5,
+
+  // After the rocket has gone, how long its smoke hangs before the wall clears
+  // for the next one. The turn is ignition + ascent + this, about 9 seconds -
+  // inside the recording, so the visitor's clip has the whole launch.
+  afterMs: 1500,
+
+  // A gentle sway once flying, sideways and in tilt.
+  sway: 0.015,
+  tiltDegrees: 3,
+
+  // The flame, as a fraction of the rocket's height.
+  flameLength: 0.45,
+
+  smoke: {
+    // Puffs a second: a billow on the pad, a trail behind the rocket.
+    padPerSecond: 70,
+    trailPerSecond: 32,
+    max: 320,
+    // How long a puff lasts, and how fast it sets off, per wall height a second.
+    lifeMs: 3200,
+    speed: 0.32,
+    opacity: 0.75,
+  },
+};
+
 export const POLL = {
   // The first check goes out almost immediately, then backs off. A fixed
   // interval meant a job that finished in 300ms still sat there until the

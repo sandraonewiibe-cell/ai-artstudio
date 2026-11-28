@@ -1,7 +1,8 @@
-import { DISPLAY, WAVES, PADDLES, FLOAT } from './config.js';
+import { DISPLAY, WAVES, PADDLES, FLOAT, LAUNCH } from './config.js';
 import { sealHoles } from './seal.js';
 import { measureHull } from './waterline.js';
 import { surveyWater } from './surface.js';
+import { Launch } from './launch.js';
 
 /**
  * The LED screen, drawn on a canvas.
@@ -106,6 +107,13 @@ export class Stage {
     /** Which background the survey was of, so a new one is surveyed again. */
     this.surveyed = null;
 
+    /**
+     * What the wall is: boats on water, or rockets in space. Set from the panel
+     * with the background; space launches the drawing instead of floating it.
+     */
+    this.scene = 'water';
+    this.launch = new Launch();
+
   }
 
   start() {
@@ -170,6 +178,10 @@ export class Stage {
       this.paddles = job.layers.paddles.map((paddle) => ({ ...paddle, lastPhase: 0 }));
       console.log(`[stage] ${this.paddles.length} oar(s) working the water`);
     }
+
+    // Ready in case the wall is showing space: where this drawing's exhaust
+    // comes out, found once from its own silhouette.
+    this.launch.begin(this.boat);
 
     this.text = job.text || null;
     this.startedAt = performance.now();
@@ -319,6 +331,11 @@ export class Stage {
 
   /** The boat and its water. Only runs when there is one. */
   drawScene(now, w, h) {
+    if (this.scene === 'space') {
+      this.drawLaunch(now, w, h);
+      return;
+    }
+
     const elapsed = now - this.startedAt;
     const progress = Math.max(0, Math.min(1, elapsed / DISPLAY.holdMs));
 
@@ -554,6 +571,39 @@ export class Stage {
 
     ctx.drawImage(source, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
     return true;
+  }
+
+  /**
+   * Boats on water, or rockets in space. Anything else is water, which is what
+   * the wall always was.
+   */
+  setScene(scene) {
+    this.scene = scene === 'space' ? 'space' : 'water';
+  }
+
+  /**
+   * How long one drawing has the wall. A boat crosses for the full hold; a
+   * rocket is gone in a few seconds, and the next one should not wait on an
+   * empty sky.
+   */
+  get holdMs() {
+    if (this.scene !== 'space') return DISPLAY.holdMs;
+    return Math.min(DISPLAY.holdMs, LAUNCH.igniteMs + LAUNCH.ascentSeconds * 1000 + LAUNCH.afterMs);
+  }
+
+  /**
+   * The drawing as a rocket: on the pad, ignition, lift-off, gone - with flame
+   * and smoke, and none of the water. See launch.js.
+   */
+  drawLaunch(now, w, h) {
+    const elapsed = now - this.startedAt;
+    const delta = Math.max(0, Math.min(100, now - this.lastFrameAt));
+    this.lastFrameAt = now;
+
+    this.launch.draw(this.ctx, this.boat, elapsed, delta, w, h);
+
+    // At the top, out of the way of the pad and the smoke.
+    if (this.text) this.drawName(w, h, 0.1);
   }
 
   /**
@@ -1081,7 +1131,7 @@ export class Stage {
   }
 
   /** The detected name, centred below the boat. */
-  drawName(w, h) {
+  drawName(w, h, at = 0.86) {
     const { ctx } = this;
     let size = Math.round(h * 0.048);
 
@@ -1099,7 +1149,7 @@ export class Stage {
     ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
     ctx.shadowBlur = h * 0.02;
     ctx.fillStyle = 'rgba(244, 244, 246, 0.94)';
-    ctx.fillText(this.text, w / 2, h * 0.86);
+    ctx.fillText(this.text, w / 2, h * at);
     ctx.restore();
   }
 }

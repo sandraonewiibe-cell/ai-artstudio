@@ -57,7 +57,8 @@ async function play(job) {
     // through while the boat sails on. Both timers run from the same moment.
     const clip = recording ? captureClip(job) : Promise.resolve();
 
-    await wait(DISPLAY.holdMs);
+    // A boat's crossing, or a rocket's launch - the stage knows which.
+    await wait(stage.holdMs);
     stage.clear();
 
     // Let the recorder finish releasing before the next visitor starts one.
@@ -178,6 +179,10 @@ const DEFAULT_BACKGROUND = '/assets/background/bg.mp4';
  */
 function applyBackground(settings) {
   const chosen = settings.background || {};
+
+  // Boats on water or rockets in space - the next drawing to arrive goes up the
+  // way the panel says, and one already up switches over on the spot.
+  stage.setScene(chosen.scene);
   const wanted = chosen.url || DEFAULT_BACKGROUND;
   // The panel saves which kind it was. A server that has not been restarted
   // since pictures were allowed drops that on save, so the file's own name is

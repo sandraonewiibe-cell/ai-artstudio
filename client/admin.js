@@ -230,6 +230,7 @@ function paintBackground() {
 }
 
 function paint() {
+  el('bgScene').value = settings.background.scene === 'space' ? 'space' : 'water';
   paintBackground();
   paintLogo('left');
   paintLogo('right');
@@ -238,6 +239,8 @@ function paint() {
 
 /** Reads the form back into the settings object, ready to send. */
 function collect() {
+  settings.background.scene = el('bgScene').value === 'space' ? 'space' : 'water';
+
   ['left', 'right'].forEach((side) => {
     settings.logos[side].enabled = el(`${side}Enabled`).checked;
     settings.logos[side].size = Number(el(`${side}Size`).value);
