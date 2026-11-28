@@ -3,6 +3,7 @@ import { Camera } from './js/camera.js';
 import { PaperScanner } from './js/detector.js';
 import { capturePage } from './js/capture.js';
 import { extract } from './js/extractor.js';
+import { loadOpenCV, cutObjects } from './js/objects.js';
 import { createSession, waitForSession } from './js/api.js';
 import { onPauseRequest } from './js/remote.js';
 
@@ -201,6 +202,10 @@ async function runSession(quad, insetRatio) {
     // Off the main thread where the browser allows it, so the screen stays
     // alive while this runs. Same extraction either way - see extractor.js.
     const drawing = await extract(page);
+
+    // Only the drawn objects, and none of the paper round them - OpenCV finds
+    // each object's outline and cuts along it. See objects.js.
+    if (drawing) drawing.canvas = await cutObjects(drawing, page);
     const t2 = performance.now();
 
     el.processStage.textContent = STAGE_LABELS.saving;
@@ -334,3 +339,7 @@ document.body.dataset.scanning = 'on';
 keepAwake();
 camera.start();
 requestAnimationFrame(tick);
+
+// OpenCV is large; fetched now, while nobody is waiting, so the first scan is
+// as quick as the rest.
+loadOpenCV();

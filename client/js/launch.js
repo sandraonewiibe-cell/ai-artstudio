@@ -344,7 +344,7 @@ function clearance(x, planets) {
 }
 
 /** A smooth curve through the points, measured so it can be walked at speed. */
-function sampleSpline(points) {
+export function sampleSpline(points) {
   const dense = [];
   const pt = (i) => points[Math.max(0, Math.min(points.length - 1, i))];
 

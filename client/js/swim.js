@@ -1,4 +1,5 @@
 import { SWIM } from './config.js';
+import { sampleSpline } from './launch.js';
 
 /**
  * Fish in the ocean, for when the wall is showing an underwater picture.
@@ -29,11 +30,27 @@ export class Swim {
     });
   }
 
-  /** Readies a new fish: which way it faces, and where its mouth is. */
+  /**
+   * Readies a new fish: which way it faces, and where its mouth is. A fish
+   * drawn standing on its tail is turned to lie along its swim first.
+   *
+   * @returns the drawing to swim - turned, if it had to be
+   */
   begin(drawing) {
+    drawing = lieDown(drawing);
     const head = findHead(drawing);
-    this.facing = head.facing;
+
+    // Every fish swims left to right. One drawn facing left is mirrored - not
+    // turned over - so it faces right and is still the right way up.
+    if (head.facing < 0) {
+      drawing = mirror(drawing);
+      head.mouth = { x: 1 - head.mouth.x, y: head.mouth.y };
+    }
+    this.drawing = drawing;
+    this.facing = 1;
     this.mouth = head.mouth;
+    this.path = null;
+    this.trail = 0;
     this.nextPuff = 400 + Math.random() * 600;
   }
 
@@ -94,11 +111,26 @@ export class Swim {
    */
   draw(ctx, drawing, elapsed, delta, w, h) {
     const cfg = SWIM;
+    // The turned copy, if begin() had to turn it.
+    if (this.drawing) drawing = this.drawing;
     const scale = Math.min((w * cfg.fishWidth) / drawing.width, (h * cfg.fishHeight) / drawing.height);
     const fishW = drawing.width * scale;
     const fishH = drawing.height * scale;
 
-    const pose = poseAt(elapsed, this.facing, fishW, w, h);
+    if (!this.path) this.path = buildDive(this.facing, fishW, w, h);
+    const pose = poseAt(this.path, elapsed, this.facing);
+
+    // A stream of bubbles off a fish plunging downwards, as in the dolphin's
+    // dive - more the steeper it goes.
+    const steep = Math.max(pose.sinking, pose.rising);
+    if (steep > 0.3) {
+      const rate = pose.rising > pose.sinking ? SWIM.bubbles.risePerSecond : SWIM.bubbles.divePerSecond;
+      this.trail += (delta / 1000) * rate * steep;
+      while (this.trail >= 1) {
+        this.trail -= 1;
+        this.addBubble(pose.x + (Math.random() - 0.5) * fishW * 0.3, pose.y - fishH * 0.2, h, 1);
+      }
+    }
 
     // Bubbles from the mouth, in little bursts at random moments.
     this.lastPuff += delta;
@@ -187,38 +219,62 @@ export class Swim {
 }
 
 /**
- * Where the fish is and how it is tilted, a moment into its swim.
- *
- * In from behind its tail, across the wall with a gentle up-and-down, a dive
- * in the middle - nose down, deep, nose up and back - and out the far side.
+ * The swim, left to right: in from the left, a dive - nose down, deep, almost
+ * to the seabed - a turn along the bottom, then up: climbing away towards the
+ * surface and out of the top of the wall, trailing bubbles all the way.
  */
-function poseAt(elapsed, facing, fishW, w, h) {
-  const cfg = SWIM;
-  const p = Math.min(1, elapsed / cfg.swimMs);
+function buildDive(facing, fishW, w, h) {
+  const { from, depth, rise } = SWIM.dive;
+  const cruise = h * SWIM.cruiseY;
+  const deep = h * depth;
 
-  // A little faster in the middle, easing at the ends.
-  const travel = p - Math.sin(p * Math.PI * 2) * 0.03;
-  // Just out of sight at each end, so it is on the wall for the whole show.
-  const from = -fishW * 0.55;
-  const to = w + fishW * 0.55;
-  const along = from + (to - from) * travel;
-  const x = facing > 0 ? along : w - along;
+  const points = [
+    { x: -fishW * 0.55, y: cruise },
+    { x: w * (from - 0.1), y: cruise + h * 0.02 },
+    // The dive.
+    { x: w * from, y: cruise + h * 0.08 },
+    { x: w * (from + 0.08), y: (cruise + deep) / 2 + h * 0.04 },
+    { x: w * (from + 0.16), y: deep },
+    // Along the bottom, turning.
+    { x: w * (from + 0.26), y: deep + h * 0.02 },
+    { x: w * (from + 0.34), y: deep - h * 0.06 },
+    // And up, away to the surface.
+    { x: w * rise.x, y: h * 0.45 },
+    { x: w * (rise.x + 0.08), y: h * 0.18 },
+    { x: w * (rise.x + 0.13), y: -h * 0.3 },
+  ];
 
-  const wave = Math.sin((elapsed / 1000) * 1.7) * h * 0.035;
-  const diveP = (p - cfg.dive.from) / (cfg.dive.to - cfg.dive.from);
-  const dive = diveP > 0 && diveP < 1 ? Math.sin(diveP * Math.PI) * h * cfg.dive.depth : 0;
-  const y = h * cfg.cruiseY + wave + dive;
+  return sampleSpline(points);
+}
 
-  // Nose follows the way it is going: down into the dive, up out of it.
-  const dt = 30;
-  const p2 = Math.min(1, (elapsed + dt) / cfg.swimMs);
-  const dP2 = (p2 - cfg.dive.from) / (cfg.dive.to - cfg.dive.from);
-  const dive2 = dP2 > 0 && dP2 < 1 ? Math.sin(dP2 * Math.PI) * h * cfg.dive.depth : 0;
-  const y2 = h * cfg.cruiseY + Math.sin(((elapsed + dt) / 1000) * 1.7) * h * 0.035 + dive2;
-  const dx = ((to - from) / cfg.swimMs) * dt;
-  const tilt = Math.max(-0.6, Math.min(0.6, Math.atan2(y2 - y, dx)));
+/**
+ * Where the fish is on its path, and which way it points.
+ *
+ * It tilts with the path - nose up into the leap, nose down into the plunge -
+ * but is held short of rolling over, so it is always the right way up.
+ * `sinking` is how steeply it is heading down, 0 to 1, for the bubble trail.
+ */
+function poseAt(path, elapsed, facing) {
+  const p = Math.min(1, elapsed / SWIM.swimMs);
+  // A touch quicker through the dives, easier at the ends.
+  const s = (p - Math.sin(p * Math.PI * 2) * 0.025) * path.length;
+  const here = path.at(s);
+  const ahead = path.at(Math.min(path.length, s + 8));
+  const before = path.at(Math.max(0, s - 8));
+  const dx = ahead.x - before.x;
+  const dy = ahead.y - before.y;
+  const heading = Math.atan2(dy, dx);
 
-  return { x, y, angle: tilt * facing };
+  // The drawing's nose points right (facing 1) or left (facing -1); turn it so
+  // the nose points along the path.
+  // Tilted to follow the path but never past nose-straight-up or down, so the
+  // fish is never shown upside down.
+  const limit = (SWIM.maxTiltDegrees * Math.PI) / 180;
+  const level = heading;
+  const wrapped = Math.atan2(Math.sin(level), Math.cos(level));
+  const angle = Math.max(-limit, Math.min(limit, wrapped));
+  const speed = Math.hypot(dx, dy) || 1;
+  return { x: here.x, y: here.y, angle, sinking: Math.max(0, dy / speed), rising: Math.max(0, -dy / speed) };
 }
 
 /**
@@ -258,6 +314,132 @@ function drawWiggling(ctx, drawing, fishW, fishH, facing, elapsed) {
  * tail. Drawn as a plain oval with no waist either end, it is taken to face
  * right, which is how most children draw one.
  */
+/** The drawing flipped left to right. */
+function mirror(drawing) {
+  const canvas = document.createElement('canvas');
+  canvas.width = drawing.width;
+  canvas.height = drawing.height;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(drawing, 0, 0);
+  return canvas;
+}
+
+/**
+ * Lays a fish flat, whatever way it was drawn on the page - standing up,
+ * diving, at a slant.
+ *
+ * The long axis of the drawn shape is measured from its silhouette (the
+ * moments of everything drawn, as OpenCV would) and the drawing is turned so
+ * that axis runs level. Turned the shortest way, never more than a quarter
+ * turn, so a fish drawn level stays exactly as it was. Nearly round shapes are
+ * left alone: they have no long axis to go by.
+ */
+function lieDown(drawing) {
+  if (!drawing || !drawing.width || !drawing.height) return drawing;
+  const axis = longAxis(drawing);
+  if (!axis || axis.elongation < SWIM.minElongation) return drawing;
+
+  // Shortest turn that brings the axis level.
+  let turn = -axis.angle;
+  if (turn > Math.PI / 2) turn -= Math.PI;
+  if (turn < -Math.PI / 2) turn += Math.PI;
+  if (Math.abs(turn) < (SWIM.levelWithinDegrees * Math.PI) / 180) return drawing;
+
+  const cos = Math.abs(Math.cos(turn));
+  const sin = Math.abs(Math.sin(turn));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(drawing.width * cos + drawing.height * sin);
+  canvas.height = Math.ceil(drawing.width * sin + drawing.height * cos);
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(turn);
+  ctx.drawImage(drawing, -drawing.width / 2, -drawing.height / 2);
+  return trimToContent(canvas);
+}
+
+/** The direction the drawn shape is longest in, and how much longer it is. */
+function longAxis(drawing) {
+  const w = Math.max(1, Math.min(200, drawing.width));
+  const h = Math.max(1, Math.round((drawing.height / drawing.width) * w));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(drawing, 0, 0, w, h);
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch {
+    return null;
+  }
+
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (data[(y * w + x) * 4 + 3] > 40) {
+        n += 1;
+        sx += x;
+        sy += y;
+      }
+    }
+  }
+  if (n < 20) return null;
+  const mx = sx / n;
+  const my = sy / n;
+  let xx = 0;
+  let yy = 0;
+  let xy = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (data[(y * w + x) * 4 + 3] > 40) {
+        xx += (x - mx) ** 2;
+        yy += (y - my) ** 2;
+        xy += (x - mx) * (y - my);
+      }
+    }
+  }
+  xx /= n;
+  yy /= n;
+  xy /= n;
+  const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
+  const half = (xx + yy) / 2;
+  const spread = Math.sqrt(Math.max(0, half * half - (xx * yy - xy * xy)));
+  const major = half + spread;
+  const minor = Math.max(1e-6, half - spread);
+  return { angle, elongation: Math.sqrt(major / minor) };
+}
+
+/** A turned drawing cut down to what is on it. */
+function trimToContent(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = canvas;
+  const { data } = ctx.getImageData(0, 0, width, height);
+  let x0 = width;
+  let y0 = height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * 4 + 3] > 10) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) return canvas;
+  const out = document.createElement('canvas');
+  out.width = x1 - x0 + 1;
+  out.height = y1 - y0 + 1;
+  out.getContext('2d').drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+  return out;
+}
+
 function findHead(drawing) {
   const fallback = { facing: 1, mouth: { x: 0.98, y: 0.45 } };
   const w = Math.max(1, Math.min(240, drawing.width));
@@ -296,21 +478,22 @@ function findHead(drawing) {
   const body = Math.max(...heights);
   if (!body) return fallback;
 
-  // How pronounced a waist is in the outer part of one side.
+  // How pronounced a waist is in the outer part of one side: the deepest dip
+  // that has something wider beyond it, towards that end. Not simply the
+  // narrowest column - the very tip of a tail fin, or of a nose, is narrow too,
+  // and has nothing beyond it.
   const waist = (from, to, step) => {
-    let narrowest = Infinity;
-    let at = -1;
-    for (let x = from; x !== to; x += step) {
-      if (heights[x] > 0 && heights[x] < narrowest) {
-        narrowest = heights[x];
-        at = x;
-      }
-    }
-    if (at < 0) return 0;
-    // Widest beyond the waist, towards the end.
+    let deepest = 0;
     let beyond = 0;
-    for (let x = at; x >= 0 && x < w; x += step) beyond = Math.max(beyond, heights[x]);
-    return beyond > narrowest * 1.4 ? (beyond - narrowest) / body : 0;
+    // Walk in from the end, keeping the widest column seen so far beyond.
+    for (let x = to - step; x !== from - step; x -= step) {
+      if (x < 0 || x >= w) continue;
+      if (heights[x] > 0 && beyond > heights[x] * 1.4) {
+        deepest = Math.max(deepest, (beyond - heights[x]) / body);
+      }
+      beyond = Math.max(beyond, heights[x]);
+    }
+    return deepest;
   };
 
   const leftWaist = waist(Math.round(w * 0.4), -1, -1);

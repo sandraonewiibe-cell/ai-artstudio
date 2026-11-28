@@ -1005,14 +1005,27 @@ export const SWIM = {
   swimMs: 7900,
 
   // The fish's size on the wall, as fractions of its width and height.
-  fishWidth: 0.3,
-  fishHeight: 0.32,
+  fishWidth: 0.25,
+  fishHeight: 0.27,
 
   // Where it cruises, down the wall.
-  cruiseY: 0.42,
+  cruiseY: 0.47,
 
-  // The dive: between these points of the crossing, this deep (of the wall).
-  dive: { from: 0.32, to: 0.68, depth: 0.28 },
+  // However the fish is drawn on the page - standing up, at a slant - it is
+  // turned to lie level along its swim, if it is at least this much longer
+  // than it is wide and more than this far off level. Rounder shapes are left.
+  minElongation: 1.25,
+  levelWithinDegrees: 8,
+
+  // The most the fish tilts with its path, either way. Kept small so it stays
+  // close to level - swimming, not standing on its nose or its tail - while it
+  // dives and climbs.
+  maxTiltDegrees: 25,
+
+  // The dive, left to right: where across the wall it starts down, how deep
+  // down the wall it bottoms out, and where across it rises away to the top.
+  dive: { from: 0.22, depth: 0.82, rise: { x: 0.68 } },
+
 
   // The tail: how many strips the drawing is cut into, how far the tip swings
   // (of the fish's height), and how fast it beats.
@@ -1021,6 +1034,10 @@ export const SWIM = {
   bubbles: {
     // Roughly how often the fish blows a few, and the seabed lets some go.
     mouthEveryMs: 900,
+    // Bubbles a second streaming off a fish heading steeply down.
+    divePerSecond: 26,
+    // ...and off one climbing away to the surface - the bubbles it goes with.
+    risePerSecond: 45,
     seabedEveryMs: 700,
     max: 160,
   },
@@ -1038,6 +1055,42 @@ export const SWIM = {
   pair: { height: 0.34, speed: 0.045 },
   dolphin: { height: 0.34, speed: 0.06 },
   scenery: { height: 0.34 },
+};
+
+/**
+ * Cutting the drawn objects out of the page with OpenCV. See objects.js.
+ */
+export const OBJECTS = {
+  // Where the browser gets OpenCV from - the npm package, served by the kiosk.
+  script: '/vendor/opencv/opencv.js',
+
+  // How hard outlines are closed up before their insides are filled, as a
+  // fraction of the drawing's shorter side. Enough to bridge a pencil line
+  // that skips; not so much that two separate things merge.
+  closeRatio: 0.02,
+
+  // Smallest object kept: a fraction of the picture, and of the biggest
+  // object on it. A name under a boat stays; a crumb of eraser does not.
+  minAreaRatio: 0.002,
+  minShareOfLargest: 0.03,
+
+  // The rim of each object - a fraction of its shorter side - where only what
+  // is clearly not paper is kept, so no sheet shows round the outside.
+  rimRatio: 0.014,
+
+  // What still counts as paper: this much darker than the paper at its
+  // darkest (shade), and this close to its colour once brightness is set
+  // aside (tint). Crayon and pen are well past both.
+  paperShade: 60,
+  paperTint: 14,
+
+  // How long a scan waits for the cut before going ahead with the extraction
+  // as it is. The first one after the scanner opens may still be waiting for
+  // OpenCV to finish starting.
+  patienceMs: 4000,
+
+  // How long OpenCV may take to start before the scanner stops waiting on it.
+  startPatienceMs: 30000,
 };
 
 export const POLL = {

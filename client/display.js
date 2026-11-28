@@ -234,7 +234,32 @@ function applyBackground(settings) {
   // comes back a moment later.
   surveyWhenPlaying();
 
+  // A video can be underwater or a night sky as well as a lake: Automatic
+  // looks at a frame of it once it is playing.
+  if (!['water', 'space', 'ocean'].includes(chosen.scene)) {
+    whenPlaying(() => {
+      if (backgroundSource.getAttribute('src') !== wanted) return;
+      const scene = sceneOf(backgroundSource, backgroundSource.videoWidth, backgroundSource.videoHeight);
+      stage.setScene(scene);
+      console.log(`[display] scene: ${scene} (automatic, from the background video)`);
+    });
+  }
+
   console.log(`[display] background is now ${wanted}`);
+}
+
+/** Runs once the background video is playing, checking a few times a second. */
+function whenPlaying(then) {
+  let tries = 0;
+  const attempt = () => {
+    tries += 1;
+    if (backgroundSource.readyState >= 2 && !backgroundSource.paused && backgroundSource.videoWidth) {
+      then();
+      return;
+    }
+    if (tries <= 40) setTimeout(attempt, 250);
+  };
+  attempt();
 }
 
 /**
@@ -248,28 +273,56 @@ function applyBackground(settings) {
 async function sceneFor(image) {
   try {
     await image.decode();
+    return sceneOf(image, image.naturalWidth, image.naturalHeight);
+  } catch {
+    return 'water';
+  }
+}
+
+/**
+ * The scene a picture or a video frame shows, measured on a small copy.
+ *
+ * Underwater is told two ways. Mostly clearly-blue-not-red; or, failing that,
+ * mostly bluish with the light coming down from above - bright at the top, dark
+ * at the bottom, which is how the sea looks from inside it. A lake or a sea
+ * seen from above is lit evenly top to bottom. Measured on the kiosk's own
+ * footage: an ocean video 0.80 blue and 72 brighter at the top; the lake video
+ * that ships with it 0.55-0.59 blue and 1-2.
+ */
+function sceneOf(source, sourceW, sourceH) {
+  try {
     const w = 64;
-    const h = Math.max(1, Math.round((image.naturalHeight / image.naturalWidth) * w));
+    const h = Math.max(1, Math.round((sourceH / sourceW) * w));
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(image, 0, 0, w, h);
+    ctx.drawImage(source, 0, 0, w, h);
     const { data } = ctx.getImageData(0, 0, w, h);
 
     let dark = 0;
     let sea = 0;
+    let bluish = 0;
+    let top = 0;
+    let bottom = 0;
+    const band = Math.max(1, Math.floor(h / 4));
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       const luma = r * 0.299 + g * 0.587 + b * 0.114;
+      const row = Math.floor(i / 4 / w);
+      if (row < band) top += luma;
+      if (row >= h - band) bottom += luma;
+      if (b > r + 15) bluish += 1;
       if (luma < NIGHT_SKY.darkBelow) dark += 1;
       else if (b > r + UNDERWATER.blueOverRed && b + g > r * 2 + UNDERWATER.blueOverRed) sea += 1;
     }
     const total = w * h;
+    const fall = (top - bottom) / (band * w);
     if (dark / total >= NIGHT_SKY.darkShare) return 'space';
     if (sea / total >= UNDERWATER.share) return 'ocean';
+    if (bluish / total >= UNDERWATER.bluishShare && fall >= UNDERWATER.lightFall) return 'ocean';
     return 'water';
   } catch {
     return 'water';
@@ -287,7 +340,7 @@ const NIGHT_SKY = { darkBelow: 70, darkShare: 0.6 };
  * and not dark - the sea seen from inside it. A boat picture has sky, shore or
  * a bright surface in it and falls short of this.
  */
-const UNDERWATER = { blueOverRed: 30, share: 0.7 };
+const UNDERWATER = { blueOverRed: 30, share: 0.7, bluishShare: 0.8, lightFall: 35 };
 
 // Autoplay is allowed because the video is muted; without it the canvas would
 // draw a still first frame forever.

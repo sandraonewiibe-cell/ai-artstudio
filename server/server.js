@@ -95,6 +95,15 @@ app.get('/admin', (req, res) => {
 
 app.use(express.static(config.paths.client));
 
+// OpenCV for the scanner's cut-out, straight out of node_modules like everything
+// else here - no build step. See client/js/objects.js.
+app.use(
+  '/vendor/opencv',
+  express.static(path.join(config.paths.root, 'node_modules', '@techstark', 'opencv-js', 'dist'), {
+    maxAge: '7d',
+  })
+);
+
 // Static asset / output folders
 app.use('/assets', express.static(config.paths.assets));
 app.use('/uploads', express.static(config.paths.uploads));
