@@ -1046,7 +1046,9 @@ export const SWIM = {
   // see-through backgrounds work here. Decoded once, to this many pixels wide.
   sprites: {
     pair: { file: 'placidplace-fish-18858_512.gif', width: 360 },
-    dolphin: { file: 'placidplace-dolphin-6173_512.gif', width: 360 },
+    // The dolphin's animation has a bird with a hoop flying over it; only the
+    // dolphin is kept. See keepOnlyTheAnimal in swim.js.
+    dolphin: { file: 'placidplace-dolphin-6173_512.gif', width: 360, onlyTheAnimal: true },
     scenery: { file: 'placidplace-fish-18652_512.gif', width: 420 },
   },
 

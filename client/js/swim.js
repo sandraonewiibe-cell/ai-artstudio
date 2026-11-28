@@ -532,6 +532,69 @@ function drawFrame(ctx, sprite, now, x, y, w, h, mirror) {
 }
 
 /**
+ * A frame with everything but the animal taken out.
+ *
+ * The dolphin animation has a bird in it, flying across the top with a hoop
+ * for the dolphin to jump through. On a wall that is meant to be underwater a
+ * bird does not belong, so each frame is cleaned as it is decoded: the bird -
+ * dark, and brown to orange - and the blue of its hoop are cleared by colour,
+ * then any small or thin piece left over (the paler side of the hoop, a fleck
+ * of splash) by size. The dolphin is grey and large, and keeps every pixel.
+ */
+function keepOnlyTheAnimal(image) {
+  const w = image.displayWidth;
+  const h = image.displayHeight;
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0);
+  const frame = ctx.getImageData(0, 0, w, h);
+  const d = frame.data;
+
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 10) continue;
+    const r = d[i];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    const luma = r * 0.299 + g * 0.587 + b * 0.114;
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    const bird = r > b + 25 || luma < 70;
+    const hoop = b > r + 45 && chroma > 50;
+    if (bird || hoop) d[i + 3] = 0;
+  }
+
+  // Whatever is left that is small is not the dolphin.
+  const seen = new Uint8Array(w * h);
+  const minArea = w * h * 0.004;
+  const stack = [];
+  for (let start = 0; start < w * h; start += 1) {
+    if (seen[start] || d[start * 4 + 3] < 10) continue;
+    const piece = [];
+    seen[start] = 1;
+    stack.push(start);
+    while (stack.length) {
+      const p = stack.pop();
+      piece.push(p);
+      const x = p % w;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx;
+          const n = p + dy * w + dx;
+          if (nx < 0 || nx >= w || n < 0 || n >= w * h) continue;
+          if (!seen[n] && d[n * 4 + 3] >= 10) {
+            seen[n] = 1;
+            stack.push(n);
+          }
+        }
+      }
+    }
+    if (piece.length < minArea) for (const p of piece) d[p * 4 + 3] = 0;
+  }
+
+  ctx.putImageData(frame, 0, 0);
+  return canvas;
+}
+
+/**
  * The animated fish from assets/ocean, decoded into frames once.
  *
  * Only the ones with see-through backgrounds can swim over the wall; the rest
@@ -547,7 +610,7 @@ async function loadSprites() {
   }
 
   await Promise.all(
-    Object.entries(SWIM.sprites).map(async ([name, { file, width }]) => {
+    Object.entries(SWIM.sprites).map(async ([name, { file, width, onlyTheAnimal }]) => {
       try {
         const response = await fetch(`/assets/ocean/${file}`);
         if (!response.ok) throw new Error(`${response.status}`);
@@ -561,8 +624,9 @@ async function loadSprites() {
         for (let i = 0; i < count; i += 1) {
           const { image } = await decoder.decode({ frameIndex: i });
           const aspect = image.displayWidth / image.displayHeight;
+          const source = onlyTheAnimal ? keepOnlyTheAnimal(image) : image;
           frames.push(
-            await createImageBitmap(image, { resizeWidth: width, resizeHeight: Math.round(width / aspect) })
+            await createImageBitmap(source, { resizeWidth: width, resizeHeight: Math.round(width / aspect) })
           );
           total += Math.max(20, (image.duration || 100000) / 1000);
           ends.push(total);
