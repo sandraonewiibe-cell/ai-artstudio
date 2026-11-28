@@ -109,12 +109,25 @@ connect(
 
 const scanner = new PaperScanner();
 
+/**
+ * Why the camera is down, kept until it is back. The retry that follows a
+ * failure reports "lost" again with no reason, and used to overwrite the reason
+ * with a bare "Reconnecting…" - so the one thing that said what to fix (another
+ * program holding the camera, permission refused) never stayed on screen.
+ */
+let cameraReason = '';
+
 const camera = new Camera(el.preview, {
   onStatus: (state, detail) => {
     const lost = state === 'lost';
     el.cameraNotice.hidden = !lost;
-    if (detail) el.cameraNoticeDetail.textContent = detail;
-    else if (lost) el.cameraNoticeDetail.textContent = 'Reconnecting…';
+    if (state === 'live') cameraReason = '';
+    if (detail) cameraReason = detail;
+    if (lost) {
+      el.cameraNoticeDetail.textContent = cameraReason
+        ? `${cameraReason} Trying again…`
+        : 'Reconnecting…';
+    }
   },
 });
 

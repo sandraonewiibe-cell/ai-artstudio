@@ -152,7 +152,8 @@ function describeError(err) {
     case 'OverconstrainedError':
       return 'No camera found. Connect the webcam.';
     case 'NotReadableError':
-      return 'Camera is in use by another application.';
+    case 'AbortError':
+      return 'Camera is in use by another program - close it (or the other browser tab using the camera).';
     default:
       return `Camera error: ${err.message}`;
   }

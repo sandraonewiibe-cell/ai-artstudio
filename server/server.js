@@ -9,6 +9,7 @@ const recordings = require('./recordings');
 const ratelimit = require('./ratelimit');
 const settings = require('./settings');
 const { publicBase, candidates } = require('./network');
+const { takeOver } = require('./takeover');
 
 const app = express();
 
@@ -345,6 +346,41 @@ const server = app.listen(config.port, config.host, () => {
 
   pipeline.warmup();
   storage.sweepOldFiles();
+});
+
+// The port already taken. Almost always it is this studio, still running from
+// an earlier `npm start` in another window: that one is stopped and this one
+// starts in its place. Anything else holding the port is left alone, and the
+// message says so instead of printing a crash. See takeover.js.
+let tookOver = false;
+server.on('error', async (err) => {
+  if (err.code !== 'EADDRINUSE') {
+    console.error('[server] could not start:', err.message);
+    process.exit(1);
+  }
+
+  if (!tookOver) {
+    tookOver = true;
+    console.log(`[server] port ${config.port} is in use - checking what is there...`);
+    const outcome = await takeOver(config.port);
+    if (outcome === 'replaced') {
+      server.listen(config.port, config.host);
+      return;
+    }
+    if (outcome === 'not-studio') {
+      console.error(
+        `\n[server] port ${config.port} is being used by another program, not the studio.\n` +
+          `         Close that program, or start the studio on another port:  set PORT=3001&& npm start\n`
+      );
+      process.exit(1);
+    }
+  }
+
+  console.error(
+    `\n[server] the studio is already running on port ${config.port} and could not be stopped.\n` +
+      `         Close the other window running it (Ctrl+C there), then run npm start again.\n`
+  );
+  process.exit(1);
 });
 
 // A recording arrives as one large request; give it room.
