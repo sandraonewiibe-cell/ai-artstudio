@@ -1,8 +1,9 @@
-import { DISPLAY, WAVES, PADDLES, FLOAT, LAUNCH } from './config.js';
+import { DISPLAY, WAVES, PADDLES, FLOAT, LAUNCH, SWIM } from './config.js';
 import { sealHoles } from './seal.js';
 import { measureHull } from './waterline.js';
 import { surveyWater } from './surface.js';
 import { Launch } from './launch.js';
+import { Swim } from './swim.js';
 
 /**
  * The LED screen, drawn on a canvas.
@@ -113,6 +114,8 @@ export class Stage {
      */
     this.scene = 'water';
     this.launch = new Launch();
+    this.swim = new Swim();
+    this.lastAmbientAt = 0;
 
   }
 
@@ -182,6 +185,7 @@ export class Stage {
     // Ready in case the wall is showing space: where this drawing's exhaust
     // comes out, found once from its own silhouette.
     this.launch.begin(this.boat);
+    this.swim.begin(this.boat);
 
     this.text = job.text || null;
     this.startedAt = performance.now();
@@ -284,6 +288,7 @@ export class Stage {
     this.splashes = [];
     this.text = null;
     this.startedAt = 0;
+    this.swim.clear();
   }
 
   get hasResult() {
@@ -320,7 +325,20 @@ export class Stage {
 
     this.drawBackground(w, h);
 
+    // The ocean is alive between visitors too: its own fish, plants and bubbles.
+    if (this.scene === 'ocean') {
+      const delta = this.lastAmbientAt ? Math.max(0, Math.min(100, now - this.lastAmbientAt)) : 16;
+      this.lastAmbientAt = now;
+      this.swim.drawAmbient(ctx, now, delta, w, h);
+    }
+
     if (this.boat) this.drawScene(now, w, h);
+
+    // Bubbles rise in front of everything in the water, fish included.
+    if (this.scene === 'ocean') {
+      this.swim.drawBubbles(ctx);
+      if (this.boat && this.text) this.drawName(w, h, 0.1);
+    }
 
     // Last, so it sits over everything - and *into* the canvas rather than in
     // front of it, which is what puts the logos and advertisements into the
@@ -333,6 +351,14 @@ export class Stage {
   drawScene(now, w, h) {
     if (this.scene === 'space') {
       this.drawLaunch(now, w, h);
+      return;
+    }
+
+    if (this.scene === 'ocean') {
+      const elapsed = now - this.startedAt;
+      const delta = Math.max(0, Math.min(100, now - this.lastFrameAt));
+      this.lastFrameAt = now;
+      this.swim.draw(this.ctx, this.boat, elapsed, delta, w, h);
       return;
     }
 
@@ -578,7 +604,7 @@ export class Stage {
    * the wall always was.
    */
   setScene(scene) {
-    this.scene = scene === 'space' ? 'space' : 'water';
+    this.scene = scene === 'space' || scene === 'ocean' ? scene : 'water';
   }
 
   /**
@@ -587,8 +613,9 @@ export class Stage {
    * empty sky.
    */
   get holdMs() {
-    if (this.scene !== 'space') return DISPLAY.holdMs;
-    return Math.min(DISPLAY.holdMs, LAUNCH.totalMs);
+    if (this.scene === 'space') return Math.min(DISPLAY.holdMs, LAUNCH.totalMs);
+    if (this.scene === 'ocean') return Math.min(DISPLAY.holdMs, SWIM.totalMs);
+    return DISPLAY.holdMs;
   }
 
   /**

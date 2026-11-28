@@ -190,7 +190,7 @@ function applyBackground(settings) {
   // Boats on water or rockets in space - the next drawing to arrive goes up the
   // way the panel says, and one already up switches over on the spot.
   // Automatic waits for the picture and looks at it; see sceneFor().
-  stage.setScene(chosen.scene === 'space' ? 'space' : 'water');
+  stage.setScene(['space', 'ocean'].includes(chosen.scene) ? chosen.scene : 'water');
   const wanted = chosen.url || DEFAULT_BACKGROUND;
   // The panel saves which kind it was. A server that has not been restarted
   // since pictures were allowed drops that on save, so the file's own name is
@@ -207,7 +207,7 @@ function applyBackground(settings) {
     backgroundSource.pause();
     stage.setBackground(backgroundImage);
 
-    if (chosen.scene !== 'water' && chosen.scene !== 'space') {
+    if (!['water', 'space', 'ocean'].includes(chosen.scene)) {
       sceneFor(backgroundImage).then((scene) => {
         // Only if the picture is still the one up when the answer comes back.
         if (backgroundImage.getAttribute('src') !== wanted) return;
@@ -238,8 +238,10 @@ function applyBackground(settings) {
 }
 
 /**
- * Boats or rockets, decided by looking at the picture: a night sky is dark all
- * over, a lake or a sea is not. Measured on a small copy, once per picture.
+ * Boats, rockets or fish, decided by looking at the picture. A night sky is dark
+ * all over; underwater is blue or sea-green nearly everywhere and not dark;
+ * anything else is a surface to float a boat on. Measured on a small copy, once
+ * per picture.
  *
  * A picture that cannot be read is water, which is what the wall always was.
  */
@@ -256,11 +258,19 @@ async function sceneFor(image) {
     const { data } = ctx.getImageData(0, 0, w, h);
 
     let dark = 0;
+    let sea = 0;
     for (let i = 0; i < data.length; i += 4) {
-      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const luma = r * 0.299 + g * 0.587 + b * 0.114;
       if (luma < NIGHT_SKY.darkBelow) dark += 1;
+      else if (b > r + UNDERWATER.blueOverRed && b + g > r * 2 + UNDERWATER.blueOverRed) sea += 1;
     }
-    return dark / (w * h) >= NIGHT_SKY.darkShare ? 'space' : 'water';
+    const total = w * h;
+    if (dark / total >= NIGHT_SKY.darkShare) return 'space';
+    if (sea / total >= UNDERWATER.share) return 'ocean';
+    return 'water';
   } catch {
     return 'water';
   }
@@ -271,6 +281,13 @@ async function sceneFor(image) {
  * dark by this measure; daytime water and sky are almost none.
  */
 const NIGHT_SKY = { darkBelow: 70, darkShare: 0.6 };
+
+/**
+ * What counts as underwater: most of the picture clearly bluer than it is red,
+ * and not dark - the sea seen from inside it. A boat picture has sky, shore or
+ * a bright surface in it and falls short of this.
+ */
+const UNDERWATER = { blueOverRed: 30, share: 0.7 };
 
 // Autoplay is allowed because the video is muted; without it the canvas would
 // draw a still first frame forever.

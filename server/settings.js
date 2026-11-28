@@ -92,7 +92,7 @@ function cleanBackground(input) {
   // What the drawings are: boats on water, rockets in space, or - the default -
   // whichever the background looks like: a night sky launches rockets. Kept
   // even without a background, so it is still set when one is uploaded.
-  const scene = ['water', 'space'].includes(background.scene) ? background.scene : 'auto';
+  const scene = ['water', 'space', 'ocean'].includes(background.scene) ? background.scene : 'auto';
 
   if (!url) return { url: null, type: 'video', scene };
 

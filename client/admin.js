@@ -230,7 +230,7 @@ function paintBackground() {
 }
 
 function paint() {
-  el('bgScene').value = ['water', 'space'].includes(settings.background.scene)
+  el('bgScene').value = ['water', 'space', 'ocean'].includes(settings.background.scene)
     ? settings.background.scene
     : 'auto';
   paintBackground();
@@ -241,7 +241,7 @@ function paint() {
 
 /** Reads the form back into the settings object, ready to send. */
 function collect() {
-  settings.background.scene = ['water', 'space'].includes(el('bgScene').value)
+  settings.background.scene = ['water', 'space', 'ocean'].includes(el('bgScene').value)
     ? el('bgScene').value
     : 'auto';
 

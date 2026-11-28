@@ -991,6 +991,55 @@ export const LAUNCH = {
   },
 };
 
+/**
+ * Fish in the ocean, instead of the boat when the wall's scene is ocean: the
+ * drawing swims across, dives and comes back up, tail swishing, blowing
+ * bubbles, with the animated fish from assets/ocean around it. See swim.js.
+ */
+export const SWIM = {
+  // The whole show, and so the clip the visitor downloads (up to
+  // DISPLAY.recordMs).
+  totalMs: 8000,
+
+  // How long the fish takes to cross the wall, entrance to exit.
+  swimMs: 7900,
+
+  // The fish's size on the wall, as fractions of its width and height.
+  fishWidth: 0.3,
+  fishHeight: 0.32,
+
+  // Where it cruises, down the wall.
+  cruiseY: 0.42,
+
+  // The dive: between these points of the crossing, this deep (of the wall).
+  dive: { from: 0.32, to: 0.68, depth: 0.28 },
+
+  // The tail: how many strips the drawing is cut into, how far the tip swings
+  // (of the fish's height), and how fast it beats.
+  tail: { strips: 28, amplitude: 0.09, speed: 7 },
+
+  bubbles: {
+    // Roughly how often the fish blows a few, and the seabed lets some go.
+    mouthEveryMs: 900,
+    seabedEveryMs: 700,
+    max: 160,
+  },
+
+  // The animated fish from assets/ocean that swim over the wall. Only ones with
+  // see-through backgrounds work here. Decoded once, to this many pixels wide.
+  sprites: {
+    pair: { file: 'placidplace-fish-18858_512.gif', width: 360 },
+    dolphin: { file: 'placidplace-dolphin-6173_512.gif', width: 360 },
+    scenery: { file: 'placidplace-fish-18652_512.gif', width: 420 },
+  },
+
+  // Their sizes, as fractions of the wall's height, and speeds, as wall
+  // widths a second.
+  pair: { height: 0.34, speed: 0.045 },
+  dolphin: { height: 0.34, speed: 0.06 },
+  scenery: { height: 0.34 },
+};
+
 export const POLL = {
   // The first check goes out almost immediately, then backs off. A fixed
   // interval meant a job that finished in 300ms still sat there until the
