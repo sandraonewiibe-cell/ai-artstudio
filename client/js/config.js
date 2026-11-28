@@ -948,12 +948,13 @@ export const WAVES = {
  */
 export const LAUNCH = {
   // The whole show, from the rocket flying in to the wall clearing. The clip
-  // the visitor downloads is this long too.
-  totalMs: 5000,
+  // the visitor downloads is this long too (up to DISPLAY.recordMs).
+  totalMs: 8000,
 
   // Of which the tour round the planets takes this; the straight launch and
-  // the last of the smoke take the rest.
-  tourMs: 3700,
+  // the last of the smoke take the rest. Longer is slower - the path is the
+  // same length whatever the time.
+  tourMs: 6300,
 
   // How much faster the launch gets each second, against the tour's speed.
   launchBoost: 2.2,
@@ -975,7 +976,7 @@ export const LAUNCH = {
     max: 360,
     // How long a puff lasts, and how fast it leaves the nozzle, per wall
     // height a second.
-    lifeMs: 1500,
+    lifeMs: 2000,
     speed: 0.12,
     opacity: 0.7,
   },
