@@ -6,6 +6,8 @@ import { extract } from './js/extractor.js';
 import { loadOpenCV, cutObjects } from './js/objects.js';
 import { createSession, waitForSession } from './js/api.js';
 import { onPauseRequest } from './js/remote.js';
+import { connect } from './js/bus.js';
+import { sceneForSettings, wordsFor } from './js/scene.js';
 
 /**
  * Screen 1 - the scanner.
@@ -31,6 +33,9 @@ const el = {
   processStage: document.getElementById('processStage'),
   processText: document.getElementById('processText'),
   sentText: document.getElementById('sentText'),
+  processTitle: document.getElementById('processTitle'),
+  sentTitle: document.getElementById('sentTitle'),
+  sentDetail: document.getElementById('sentDetail'),
   rejectTitle: document.getElementById('rejectTitle'),
   rejectDetail: document.getElementById('rejectDetail'),
   errorDetail: document.getElementById('errorDetail'),
@@ -59,16 +64,48 @@ const HINTS = {
   paused: 'SCANNING PAUSED',
 };
 
-const REJECTIONS = {
-  'not-a-boat': {
-    title: "WE COULDN'T FIND A BOAT",
-    detail: 'Draw a boat on the paper and try again.',
+/**
+ * What the visitor is told when a drawing is turned away, in the words of
+ * whatever the wall is showing - see wordsFor().
+ */
+function rejectionCopy(reason) {
+  if (reason === 'no-drawing') {
+    return { title: 'NOTHING TO SEE YET', detail: words.emptyDetail };
+  }
+  return { title: words.rejectTitle, detail: words.rejectDetail };
+}
+
+/**
+ * Boat, rocket or fish: what the wall is showing decides what the scanner says.
+ * Worked out the way the wall works it out, and again whenever the panel
+ * changes the background.
+ */
+let words = wordsFor('water');
+
+function applyWords(scene) {
+  words = wordsFor(scene);
+  el.processTitle.textContent = words.creating;
+  el.sentTitle.textContent = words.sent;
+  el.sentDetail.textContent = words.sentDetail;
+  STAGE_LABELS.generating = words.generating;
+  console.log(`[app] wording for ${scene}`);
+}
+
+async function loadScene(settings) {
+  try {
+    const current = settings || (await (await fetch('/api/settings')).json());
+    applyWords(await sceneForSettings(current));
+  } catch (err) {
+    console.warn('[app] could not tell what the wall is showing:', err.message);
+  }
+}
+
+connect(
+  (event) => {
+    if (event.type === 'settings' && event.settings) loadScene(event.settings);
   },
-  'no-drawing': {
-    title: 'NOTHING TO SEE YET',
-    detail: 'Draw a boat on the paper, then place it under the camera.',
-  },
-};
+  { onOpen: () => loadScene() }
+);
 
 const scanner = new PaperScanner();
 
@@ -289,9 +326,9 @@ async function showHandoff(text) {
   await new Promise((resolve) => setTimeout(resolve, DISPLAY.sentMs));
 }
 
-/** Tells the visitor the drawing was not a boat, then returns to scanning. */
+/** Tells the visitor the drawing was turned away, then returns to scanning. */
 async function showRejection(reason) {
-  const copy = REJECTIONS[reason] || REJECTIONS['not-a-boat'];
+  const copy = rejectionCopy(reason);
 
   el.rejectTitle.textContent = copy.title;
   el.rejectDetail.textContent = copy.detail;
