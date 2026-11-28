@@ -230,7 +230,9 @@ function paintBackground() {
 }
 
 function paint() {
-  el('bgScene').value = settings.background.scene === 'space' ? 'space' : 'water';
+  el('bgScene').value = ['water', 'space'].includes(settings.background.scene)
+    ? settings.background.scene
+    : 'auto';
   paintBackground();
   paintLogo('left');
   paintLogo('right');
@@ -239,7 +241,9 @@ function paint() {
 
 /** Reads the form back into the settings object, ready to send. */
 function collect() {
-  settings.background.scene = el('bgScene').value === 'space' ? 'space' : 'water';
+  settings.background.scene = ['water', 'space'].includes(el('bgScene').value)
+    ? el('bgScene').value
+    : 'auto';
 
   ['left', 'right'].forEach((side) => {
     settings.logos[side].enabled = el(`${side}Enabled`).checked;

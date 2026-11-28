@@ -31,7 +31,7 @@ function defaults() {
      * clearing it puts the original back, which is why the original is never
      * overwritten on disk.
      */
-    background: { url: null, type: 'video', scene: 'water' },
+    background: { url: null, type: 'video', scene: 'auto' },
 
     logos: {
       left: { enabled: false, url: null, size: 10 },
@@ -89,10 +89,10 @@ function cleanBackground(input) {
   const background = input && typeof input === 'object' ? input : {};
   const url = ownUrl(background.url);
 
-  // What the drawings are: boats on water, or rockets in space. Space only
-  // makes sense with a background the organiser chose, but the choice is kept
-  // either way so it is still set when they upload one.
-  const scene = background.scene === 'space' ? 'space' : 'water';
+  // What the drawings are: boats on water, rockets in space, or - the default -
+  // whichever the background looks like: a night sky launches rockets. Kept
+  // even without a background, so it is still set when one is uploaded.
+  const scene = ['water', 'space'].includes(background.scene) ? background.scene : 'auto';
 
   if (!url) return { url: null, type: 'video', scene };
 

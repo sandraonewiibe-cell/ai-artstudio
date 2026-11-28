@@ -588,19 +588,27 @@ export class Stage {
    */
   get holdMs() {
     if (this.scene !== 'space') return DISPLAY.holdMs;
-    return Math.min(DISPLAY.holdMs, LAUNCH.igniteMs + LAUNCH.ascentSeconds * 1000 + LAUNCH.afterMs);
+    return Math.min(DISPLAY.holdMs, LAUNCH.totalMs);
   }
 
   /**
-   * The drawing as a rocket: on the pad, ignition, lift-off, gone - with flame
-   * and smoke, and none of the water. See launch.js.
+   * The drawing as a rocket: round the planets in the background, then a
+   * straight launch - with flame and smoke, and none of the water. See launch.js.
    */
   drawLaunch(now, w, h) {
     const elapsed = now - this.startedAt;
     const delta = Math.max(0, Math.min(100, now - this.lastFrameAt));
     this.lastFrameAt = now;
 
-    this.launch.draw(this.ctx, this.boat, elapsed, delta, w, h);
+    // The planets to fly round, from the picture behind - looked for once per
+    // background, and only once it has something to look at.
+    const bg = this.background;
+    const ready = bg && (bg.naturalWidth || bg.videoWidth);
+    if (ready) {
+      this.launch.usePlanets(bg, `${bg.currentSrc || bg.src}|${w}x${h}`, w, h);
+    }
+
+    this.launch.draw(this.ctx, this.boat, elapsed, delta, w, h, (ctx) => this.paintBackground(ctx, w, h));
 
     // At the top, out of the way of the pad and the smoke.
     if (this.text) this.drawName(w, h, 0.1);

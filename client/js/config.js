@@ -941,47 +941,50 @@ export const WAVES = {
 };
 
 /**
- * The rocket launch, shown instead of the boat when the wall's scene is space.
- * See launch.js.
+ * The rocket's show, instead of the boat when the wall's scene is space: a
+ * five-second tour round the planets ending in a straight launch. See launch.js.
  */
 export const LAUNCH = {
-  // The rocket's box, as fractions of the wall.
-  maxWidth: 0.26,
-  maxHeight: 0.42,
+  // The whole show, from the rocket flying in to the wall clearing. The clip
+  // the visitor downloads is this long too.
+  totalMs: 5000,
 
-  // Where the bottom of the rocket stands before lift-off, down the wall.
-  padY: 0.9,
+  // Of which the tour round the planets takes this; the straight launch and
+  // the last of the smoke take the rest.
+  tourMs: 3700,
 
-  // On the pad with the engine lighting, shaking, before it moves.
-  igniteMs: 1800,
-  // Height of the shake, as a fraction of the wall.
-  shake: 0.004,
+  // How much faster the launch gets each second, against the tour's speed.
+  launchBoost: 2.2,
 
-  // From lift-off to clear of the top of the wall. Shorter than the crossing,
-  // and inside the recording, so the clip shows the whole flight.
-  ascentSeconds: 5.5,
+  // The rocket's size on the wall, as fractions of its height and width.
+  rocketHeight: 0.2,
+  rocketWidth: 0.16,
 
-  // After the rocket has gone, how long its smoke hangs before the wall clears
-  // for the next one. The turn is ignition + ascent + this, about 9 seconds -
-  // inside the recording, so the visitor's clip has the whole launch.
-  afterMs: 1500,
+  // How far out from a planet's edge the orbit runs, in rocket lengths.
+  orbitGap: 0.55,
 
-  // A gentle sway once flying, sideways and in tilt.
-  sway: 0.015,
-  tiltDegrees: 3,
-
-  // The flame, as a fraction of the rocket's height.
+  // The flame, as a fraction of the rocket's length.
   flameLength: 0.45,
 
   smoke: {
-    // Puffs a second: a billow on the pad, a trail behind the rocket.
-    padPerSecond: 70,
-    trailPerSecond: 32,
-    max: 320,
-    // How long a puff lasts, and how fast it sets off, per wall height a second.
-    lifeMs: 3200,
-    speed: 0.32,
-    opacity: 0.75,
+    // Puffs a second: a trail on the tour, a burst at the launch.
+    trailPerSecond: 55,
+    launchPerSecond: 120,
+    max: 360,
+    // How long a puff lasts, and how fast it leaves the nozzle, per wall
+    // height a second.
+    lifeMs: 1500,
+    speed: 0.12,
+    opacity: 0.7,
+  },
+
+  // What counts as a planet in the background picture: bright, colourful,
+  // round and big enough. The sky, stars and comets all fail one of these.
+  planets: {
+    minLuma: 85,
+    minSaturation: 0.3,
+    minAreaRatio: 0.0025,
+    minRoundness: 0.3,
   },
 };
 

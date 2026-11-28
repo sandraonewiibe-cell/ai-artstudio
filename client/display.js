@@ -41,8 +41,14 @@ function showNotice(visible, detail) {
   if (detail) linkDetail.textContent = detail;
 }
 
-/** Recording covers the opening of the crossing, never more than all of it. */
-const RECORD_MS = Math.min(DISPLAY.recordMs, DISPLAY.holdMs);
+/**
+ * Recording covers the opening of the turn, never more than all of it: most of
+ * a boat's crossing, or the whole of a rocket's five-second show. Worked out
+ * per turn, because the scene can change between them.
+ */
+function recordMsFor(holdMs) {
+  return Math.min(DISPLAY.recordMs, holdMs);
+}
 
 async function play(job) {
   busy = true;
@@ -55,10 +61,11 @@ async function play(job) {
 
     // The clip is shorter than the crossing, so the recorder stops partway
     // through while the boat sails on. Both timers run from the same moment.
-    const clip = recording ? captureClip(job) : Promise.resolve();
+    // A boat's crossing, or a rocket's show - the stage knows which.
+    const holdMs = stage.holdMs;
+    const clip = recording ? captureClip(job, recordMsFor(holdMs)) : Promise.resolve();
 
-    // A boat's crossing, or a rocket's launch - the stage knows which.
-    await wait(stage.holdMs);
+    await wait(holdMs);
     stage.clear();
 
     // Let the recorder finish releasing before the next visitor starts one.
@@ -74,9 +81,9 @@ async function play(job) {
   }
 }
 
-/** Stops the recorder after RECORD_MS and posts what it captured. */
-async function captureClip(job) {
-  await wait(RECORD_MS);
+/** Stops the recorder after `ms` and posts what it captured. */
+async function captureClip(job, ms) {
+  await wait(ms);
 
   try {
     const blob = await recorder.stop();
@@ -85,7 +92,7 @@ async function captureClip(job) {
       return;
     }
 
-    console.log(`[display] captured ${(RECORD_MS / 1000).toFixed(1)}s, ` +
+    console.log(`[display] captured ${(ms / 1000).toFixed(1)}s, ` +
       `${Math.round(blob.size / 1024)}KB`);
     await upload(blob, job);
   } catch (err) {
@@ -182,7 +189,8 @@ function applyBackground(settings) {
 
   // Boats on water or rockets in space - the next drawing to arrive goes up the
   // way the panel says, and one already up switches over on the spot.
-  stage.setScene(chosen.scene);
+  // Automatic waits for the picture and looks at it; see sceneFor().
+  stage.setScene(chosen.scene === 'space' ? 'space' : 'water');
   const wanted = chosen.url || DEFAULT_BACKGROUND;
   // The panel saves which kind it was. A server that has not been restarted
   // since pictures were allowed drops that on save, so the file's own name is
@@ -198,6 +206,15 @@ function applyBackground(settings) {
     // Nothing to play while a picture is up; it would only cost decoding.
     backgroundSource.pause();
     stage.setBackground(backgroundImage);
+
+    if (chosen.scene !== 'water' && chosen.scene !== 'space') {
+      sceneFor(backgroundImage).then((scene) => {
+        // Only if the picture is still the one up when the answer comes back.
+        if (backgroundImage.getAttribute('src') !== wanted) return;
+        stage.setScene(scene);
+        console.log(`[display] scene: ${scene} (automatic, from the background)`);
+      });
+    }
     console.log(`[display] background is now the picture ${wanted}`);
     return;
   }
@@ -219,6 +236,41 @@ function applyBackground(settings) {
 
   console.log(`[display] background is now ${wanted}`);
 }
+
+/**
+ * Boats or rockets, decided by looking at the picture: a night sky is dark all
+ * over, a lake or a sea is not. Measured on a small copy, once per picture.
+ *
+ * A picture that cannot be read is water, which is what the wall always was.
+ */
+async function sceneFor(image) {
+  try {
+    await image.decode();
+    const w = 64;
+    const h = Math.max(1, Math.round((image.naturalHeight / image.naturalWidth) * w));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+
+    let dark = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      if (luma < NIGHT_SKY.darkBelow) dark += 1;
+    }
+    return dark / (w * h) >= NIGHT_SKY.darkShare ? 'space' : 'water';
+  } catch {
+    return 'water';
+  }
+}
+
+/**
+ * What counts as a night sky. The kiosk's space picture is about nine tenths
+ * dark by this measure; daytime water and sky are almost none.
+ */
+const NIGHT_SKY = { darkBelow: 70, darkShare: 0.6 };
 
 // Autoplay is allowed because the video is muted; without it the canvas would
 // draw a still first frame forever.
