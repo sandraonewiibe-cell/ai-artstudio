@@ -28,10 +28,11 @@ export const DETECTION = {
   // waiting out the wobble as the sheet is set down. Raise it if hands are
   // getting into shots.
   //
-  // Paper mode has no markers to do that guarding, so this is longer: long
-  // enough that a sheet being slid into place, or let go of, is not caught
-  // mid-move. Hands are checked separately - see `hands` below.
-  stableMs: 800,
+  // Paper mode has no markers to do that guarding; the hand check below does
+  // that job instead, so this only has to outlast the wobble of a sheet being
+  // set down or a page settling after it is turned. 0.45s does, and keeps the
+  // next sketch scanning almost as soon as the page is open.
+  stableMs: 450,
 
   // A hand on the sheet. Something solid, much darker than the paper, reaching
   // in from the sheet's edge, blocks capture until it has gone.
@@ -552,8 +553,9 @@ export const DISPLAY = {
   // crossing instead.
   recordMs: 8000,
 
-  // How long the scanner shows "your boat is sailing" before re-arming.
-  sentMs: 2500,
+  // How long the scanner shows "sent" before it can take the next sheet. Kept
+  // short so a visitor turning to the next page is scanned straight away.
+  sentMs: 1200,
 
   // How long the "that wasn't a boat" message is shown.
   rejectMs: 4500,
