@@ -59,7 +59,7 @@ const OVERLAY = {
 export class Stage {
   /**
    * @param {HTMLCanvasElement} canvas
-   * @param {HTMLVideoElement} background looping background video
+   * @param {HTMLVideoElement|HTMLImageElement} background looping video, or a picture
    */
   constructor(canvas, background) {
     this.canvas = canvas;
@@ -536,16 +536,38 @@ export class Stage {
    * @returns {boolean} whether there was a frame to draw
    */
   paintBackground(ctx, w, h) {
-    const video = this.background;
-    if (!video || !video.videoWidth || video.readyState < 2) return false;
+    const source = this.background;
+    if (!source) return false;
+
+    // A video or a picture, whichever the panel chose. Either has to have
+    // something to show before it is drawn.
+    const isImage = typeof HTMLImageElement !== 'undefined' && source instanceof HTMLImageElement;
+    const width = isImage ? source.naturalWidth : source.videoWidth;
+    const height = isImage ? source.naturalHeight : source.videoHeight;
+    if (!width || !height) return false;
+    if (isImage ? !source.complete : source.readyState < 2) return false;
 
     // Cover: fill the canvas, crop the overflow.
-    const scale = Math.max(w / video.videoWidth, h / video.videoHeight);
-    const drawW = video.videoWidth * scale;
-    const drawH = video.videoHeight * scale;
+    const scale = Math.max(w / width, h / height);
+    const drawW = width * scale;
+    const drawH = height * scale;
 
-    ctx.drawImage(video, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+    ctx.drawImage(source, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
     return true;
+  }
+
+  /**
+   * Draws the wall's background from a different element from now on - the
+   * looping video, or a still picture.
+   *
+   * A picture has no moving water to find, so the surface goes back to the
+   * default rather than staying wherever it was measured on the last video.
+   */
+  setBackground(element) {
+    if (this.background === element) return;
+    this.background = element;
+    this.water = { top: 0, waterline: FLOAT.surface.sit, moving: false };
+    this.surveyed = null;
   }
 
   /**

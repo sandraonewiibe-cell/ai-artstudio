@@ -15,6 +15,7 @@ import { createOverlay } from './js/overlay.js';
 
 const canvas = document.getElementById('stage');
 const backgroundSource = document.getElementById('backgroundSource');
+const backgroundImage = document.getElementById('backgroundImage');
 const link = document.getElementById('link');
 const linkDetail = document.getElementById('linkDetail');
 
@@ -167,20 +168,36 @@ loadSettings();
 const DEFAULT_BACKGROUND = '/assets/background/bg.mp4';
 
 /**
- * Swaps the video behind everything, if the panel has been given one.
+ * Swaps what is behind everything, if the panel has been given something: a
+ * video, or a still picture.
  *
  * The original file is never touched, so clearing it in the panel puts the
- * kiosk's own back. The canvas skips a frame or two while the new one loads -
- * `drawBackground` waits for it to have data - which is a moment of black on a
- * change somebody made deliberately.
+ * kiosk's own video back. The canvas skips a frame or two while the new one
+ * loads - `paintBackground` waits for it to have something to show - which is
+ * a moment of black on a change somebody made deliberately.
  */
 function applyBackground(settings) {
-  const wanted = (settings.background && settings.background.url) || DEFAULT_BACKGROUND;
-  const current = backgroundSource.getAttribute('src');
-  if (current === wanted) return;
+  const chosen = settings.background || {};
+  const wanted = chosen.url || DEFAULT_BACKGROUND;
+  const isImage = Boolean(chosen.url) && chosen.type === 'image';
 
-  backgroundSource.src = wanted;
-  backgroundSource.load();
+  if (isImage) {
+    if (backgroundImage.getAttribute('src') !== wanted) backgroundImage.src = wanted;
+
+    // Nothing to play while a picture is up; it would only cost decoding.
+    backgroundSource.pause();
+    stage.setBackground(backgroundImage);
+    console.log(`[display] background is now the picture ${wanted}`);
+    return;
+  }
+
+  stage.setBackground(backgroundSource);
+
+  const current = backgroundSource.getAttribute('src');
+  if (current !== wanted) {
+    backgroundSource.src = wanted;
+    backgroundSource.load();
+  }
   startBackground();
 
   // Where the water is in this footage is a different question from where it was

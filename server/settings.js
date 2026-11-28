@@ -25,13 +25,13 @@ const MAX_ADS = 12;
 function defaults() {
   return {
     /**
-     * The video behind everything on the wall.
+     * The picture or video behind everything on the wall.
      *
-     * null means the one that ships with the kiosk. Uploading replaces it;
+     * null means the video that ships with the kiosk. Uploading replaces it;
      * clearing it puts the original back, which is why the original is never
      * overwritten on disk.
      */
-    background: { url: null },
+    background: { url: null, type: 'video' },
 
     logos: {
       left: { enabled: false, url: null, size: 10 },
@@ -73,6 +73,31 @@ function ownUrl(url) {
   if (!/^\/media\/[A-Za-z0-9._-]+$/.test(url)) return null;
   if (url.includes('..')) return null;
   return url;
+}
+
+/** Extensions a stored picture can have; anything else is taken for video. */
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg\+?xml|svg)$/i;
+
+/**
+ * The background: an uploaded file, and whether it is a picture or a video.
+ *
+ * The type is what the panel was told when the file was stored. Settings saved
+ * before backgrounds could be pictures have none, and the file's extension
+ * says the same thing.
+ */
+function cleanBackground(input) {
+  const background = input && typeof input === 'object' ? input : {};
+  const url = ownUrl(background.url);
+  if (!url) return { url: null, type: 'video' };
+
+  const type =
+    background.type === 'image' || background.type === 'video'
+      ? background.type
+      : IMAGE_EXT.test(url)
+        ? 'image'
+        : 'video';
+
+  return { url, type };
 }
 
 function cleanLogo(input, fallback) {
@@ -140,7 +165,7 @@ function clean(input) {
   const logos = patch.logos && typeof patch.logos === 'object' ? patch.logos : {};
 
   return {
-    background: { url: ownUrl(patch.background && patch.background.url) },
+    background: cleanBackground(patch.background),
     logos: {
       left: cleanLogo(logos.left, base.logos.left),
       right: cleanLogo(logos.right, base.logos.right),

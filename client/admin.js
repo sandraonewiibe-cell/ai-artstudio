@@ -203,23 +203,30 @@ function paintBackground() {
     return;
   }
 
-  const video = Object.assign(document.createElement('video'), {
-    src: settings.background.url,
-    muted: true,
-    loop: true,
-    autoplay: true,
-  });
+  const shown =
+    settings.background.type === 'image'
+      ? Object.assign(document.createElement('img'), {
+          src: settings.background.url,
+          alt: 'Background picture',
+        })
+      : Object.assign(document.createElement('video'), {
+          src: settings.background.url,
+          muted: true,
+          loop: true,
+          autoplay: true,
+        });
 
   const restore = document.createElement('button');
   restore.className = 'danger';
   restore.textContent = 'Back to the original';
   restore.addEventListener('click', () => {
     settings.background.url = null;
+    settings.background.type = 'video';
     paintBackground();
     show('Removed. Save to apply.');
   });
 
-  preview.append(video, restore);
+  preview.append(shown, restore);
 }
 
 function paint() {
@@ -271,8 +278,13 @@ el('bgFile').addEventListener('change', async (event) => {
 
   show('Uploading…');
   try {
+    if (!/^(image|video)\//.test(file.type)) {
+      throw new Error('That is not a picture or a video. Choose an image or a video file.');
+    }
+
     const stored = await upload(file, 'background');
     settings.background.url = stored.url;
+    settings.background.type = stored.type === 'video' ? 'video' : 'image';
     paintBackground();
     show('Uploaded. Save to apply.', 'good');
   } catch (err) {
